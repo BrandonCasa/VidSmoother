@@ -312,12 +312,11 @@ jobs:
           $env:PATH = "$runtimeRoot;$vsRoot;$sitePackages;$env:PATH"
           $env:VAPOURSYNTH_EXTRA_PLUGIN_PATH = (Resolve-Path (Join-Path $vsRoot "vs-plugins")).Path
 
-          # Use the VapourSynth CLI beside the bundled vspipe if present.
           $vapoursynthExe = Get-ChildItem -Path $vsRoot -Recurse -Filter "vapoursynth.exe" |
             Select-Object -First 1
 
           if ($null -eq $vapoursynthExe) {
-            throw "vapoursynth.exe not found in bundled VapourSynth folder. The PyPI package layout changed or it was trimmed."
+            throw "vapoursynth.exe not found in bundled VapourSynth folder."
           }
 
           & $vapoursynthExe.FullName config
@@ -325,9 +324,9 @@ jobs:
             throw "vapoursynth config failed with exit code $LASTEXITCODE"
           }
 
-          & $vspipe --version
+          & (Join-Path $vsRoot "vspipe.exe") --version
           if ($LASTEXITCODE -ne 0) {
-            throw "Bundled vspipe failed after vapoursynth config"
+            throw "Bundled vspipe could not initialize VSScript"
           }
 
       - name: Smoke test exe
