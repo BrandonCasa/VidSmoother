@@ -281,6 +281,40 @@ jobs:
           New-Item -ItemType Directory -Force -Path $releaseDir | Out-Null
           Copy-Item -Recurse -Force -Path ".\dist\VidSmoother" -Destination $releaseDir
 
+          # Trim files that are not needed at runtime.
+          # This is conservative: removes caches, tests, source maps, debug symbols, static libs, and Python bytecode.
+          $trimPatterns = @(
+            "__pycache__",
+            ".pytest_cache",
+            "tests",
+            "test",
+            "*.pyc",
+            "*.pyo",
+            "*.pdb",
+            "*.lib",
+            "*.exp",
+            "*.map",
+            "*.ilk",
+            "*.iobj",
+            "*.ipdb",
+            "*.a",
+            "*.h",
+            "*.hpp",
+            "*.c",
+            "*.cpp",
+            "*.cu",
+            "*.cuh",
+            "*.md",
+            "*.rst",
+            "*.html",
+            "*.js.map"
+          )
+
+          foreach ($pattern in $trimPatterns) {
+            Get-ChildItem -Path $releaseDir -Recurse -Force -ErrorAction SilentlyContinue -Filter $pattern |
+              Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+          }
+
           $notes = @"
           VidSmoother Windows 11 NVIDIA package
 
@@ -289,6 +323,7 @@ jobs:
           - FFmpeg: $env:BTBN_FFMPEG_BUILDS_TAG ($env:BTBN_FFMPEG_BUILDS_ASSET)
           - VapourSynth: $env:VAPOURSYNTH_VERSION_LABEL Python package
           - L-SMASH-Works: $env:HOMEOFAVISYNTHPLUSEVOLUTION_L_SMASH_WORKS_TAG ($env:HOMEOFAVISYNTHPLUSEVOLUTION_L_SMASH_WORKS_ASSET)
+          - MiscFilters VapourSynth plugin for misc.SCDetect / vsrife scene-change detection
           - Python runtime/packages are bundled beside VidSmoother.exe by PyInstaller onedir mode.
 
           Target machine requirements:
@@ -296,7 +331,8 @@ jobs:
           - NVIDIA GPU with a current NVIDIA driver
 
           Usage:
-          - Extract the zip, then put input videos beside VidSmoother.exe in an input folder, or pass --input-dir.
+          - Download all .7z parts.
+          - Extract the .7z.001 file with 7-Zip.
           - Run VidSmoother.exe --dry-run to verify commands.
           - Run VidSmoother.exe --overwrite to process videos.
 
@@ -304,22 +340,48 @@ jobs:
           "@
           $notes | Set-Content -Path (Join-Path $releaseDir "README.txt") -Encoding ASCII
 
-          $zipName = "$($env:PACKAGE_NAME)-${{ inputs.version }}.zip"
-          $zipPath = Join-Path $env:RUNNER_TEMP $zipName
+          $archiveBaseName = "$($env:PACKAGE_NAME)-${{ inputs.version }}.7z"
+          $archiveBasePath = Join-Path $env:RUNNER_TEMP $archiveBaseName
+
           Push-Location $releaseDir
-          7z a -tzip -mx=5 $zipPath *
+
+          # Use .7z instead of .zip and split into <2GB chunks for GitHub Release asset limits.
+          # 1900m leaves margin below 2,147,483,648 bytes.
+          7z a `
+            -t7z `
+            -mx=9 `
+            -m0=LZMA2 `
+            -md=256m `
+            -mfb=64 `
+            -ms=on `
+            -v1900m `
+            $archiveBasePath `
+            *
+
           Pop-Location
-          if (-not (Test-Path $zipPath)) {
-            throw "Release zip was not created."
+
+          $archiveParts = Get-ChildItem -Path $env:RUNNER_TEMP -Filter "$archiveBaseName.*" | Sort-Object Name
+          if (-not $archiveParts -or $archiveParts.Count -eq 0) {
+            throw "Release archive parts were not created."
           }
+
+          foreach ($part in $archiveParts) {
+            if ($part.Length -ge 2147483648) {
+              throw "Archive part too large for GitHub release asset limit: $($part.FullName) is $($part.Length) bytes"
+            }
+          }
+
           "RELEASE_DIR=$releaseDir" | Out-File -FilePath $env:GITHUB_ENV -Append
-          "ZIP_PATH=$zipPath" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "ARCHIVE_GLOB=$env:RUNNER_TEMP\$archiveBaseName.*" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+          Write-Host "Created archive parts:"
+          $archiveParts | ForEach-Object { Write-Host "$($_.Name): $($_.Length) bytes" }
 
       - name: Upload package artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.PACKAGE_NAME }}-${{ inputs.version }}
-          path: ${{ env.ZIP_PATH }}
+          path: ${{ env.ARCHIVE_GLOB }}
           if-no-files-found: error
 
       - name: Publish GitHub release
@@ -328,6 +390,6 @@ jobs:
         with:
           tag_name: ${{ inputs.version }}
           name: VidSmoother ${{ inputs.version }} Windows 11 NVIDIA
-          files: ${{ env.ZIP_PATH }}
+          files: ${{ env.ARCHIVE_GLOB }}
           make_latest: false
           generate_release_notes: true
