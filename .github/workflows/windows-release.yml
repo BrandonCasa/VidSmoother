@@ -200,24 +200,53 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
+
+          function Invoke-Native {
+            param(
+              [Parameter(Mandatory)] [string] $FilePath,
+              [Parameter(ValueFromRemainingArguments = $true)] [string[]] $Arguments
+            )
+
+            & $FilePath @Arguments
+            if ($LASTEXITCODE -ne 0) {
+              throw "Command failed with exit code $LASTEXITCODE`: $FilePath $($Arguments -join ' ')"
+            }
+          }
+
           $python = ".\.venv-build\Scripts\python.exe"
+          $scriptsDir = Split-Path $python
+          $vsrepo = Join-Path $scriptsDir "vsrepo.exe"
+
+          Invoke-Native $python -m pip install --upgrade vsrepo
+
+          if (-not (Test-Path $vsrepo)) {
+            throw "vsrepo.exe was not found after installing vsrepo: $vsrepo"
+          }
 
           # vsrife uses misc.SCDetect for scene-change detection.
           # That namespace comes from MiscFilters.dll.
-          & $python -m pip install --upgrade vsrepo
-          & $python -m vsrepo update
-          & $python -m vsrepo install misc
+          Invoke-Native $vsrepo update
+          Invoke-Native $vsrepo install misc
 
           $vsPluginDir = & $python -c "import vapoursynth as vs; print(vs.get_plugin_dir())"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Could not resolve VapourSynth plugin dir."
+          }
+
+          $vsPluginDir = $vsPluginDir.Trim()
           if (-not (Test-Path $vsPluginDir)) {
             throw "VapourSynth plugin dir does not exist: $vsPluginDir"
           }
 
-          $miscPlugin = Get-ChildItem -Path $vsPluginDir -Recurse -Include "MiscFilters.dll", "*Misc*.dll" |
+          $miscPlugin = Get-ChildItem -Path $vsPluginDir -Recurse -Include "MiscFilters.dll", "*Misc*.dll" -ErrorAction SilentlyContinue |
             Select-Object -First 1
 
           if ($null -eq $miscPlugin) {
-            throw "vsrepo installed misc, but MiscFilters.dll was not found in: $vsPluginDir"
+            Write-Host "Plugin dir contents:"
+            Get-ChildItem -Path $vsPluginDir -Recurse -Force -ErrorAction SilentlyContinue | ForEach-Object {
+              Write-Host $_.FullName
+            }
+            throw "vsrepo install misc completed, but MiscFilters.dll was not found in: $vsPluginDir"
           }
 
           $bundlePluginDir = Join-Path $env:BUNDLE_ROOT "libs\vapoursynth\vs-plugins"
@@ -225,8 +254,7 @@ jobs:
           Copy-Item -Force -Path $miscPlugin.FullName -Destination $bundlePluginDir
 
           Write-Host "Bundled VapourSynth misc plugin:"
-          Write-Host $miscPlugin.FullName
-          Write-Host "-> $bundlePluginDir"
+          Write-Host "$($miscPlugin.FullName) -> $bundlePluginDir"
 
       - name: Copy embedded Python runtime
         shell: pwsh
