@@ -301,6 +301,76 @@ jobs:
             throw "Bundled release is missing L-SMASH VapourSynth plugin dll"
           }
 
+          $vsRoot = ".\dist\VidSmoother\_internal\libs\vapoursynth"
+          if (-not (Test-Path $vsRoot)) {
+            $vsRoot = ".\dist\VidSmoother\libs\vapoursynth"
+          }
+
+          $runtimeRoot = ".\dist\VidSmoother\_internal\python-runtime"
+          if (-not (Test-Path $runtimeRoot)) {
+            $runtimeRoot = ".\dist\VidSmoother\python-runtime"
+          }
+
+          $sitePackages = ".\dist\VidSmoother\_internal\python\site-packages"
+          if (-not (Test-Path $sitePackages)) {
+            $sitePackages = ".\dist\VidSmoother\python\site-packages"
+          }
+
+          $env:PYTHONHOME = (Resolve-Path $runtimeRoot).Path
+          $env:PYTHONPATH = (Resolve-Path $sitePackages).Path
+          $env:PATH = "$runtimeRoot;$vsRoot;$sitePackages;$env:PATH"
+          $env:VAPOURSYNTH_EXTRA_PLUGIN_PATH = (Resolve-Path (Join-Path $vsRoot "vs-plugins")).Path
+
+          & (Join-Path $vsRoot "vspipe.exe") --version
+          if ($LASTEXITCODE -ne 0) {
+            throw "Bundled vspipe could not initialize VSScript"
+          }
+
+      - name: Configure bundled VapourSynth Python binding
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $appRoot = ".\dist\VidSmoother"
+          $internalRoot = Join-Path $appRoot "_internal"
+
+          if (-not (Test-Path $internalRoot)) {
+            $internalRoot = $appRoot
+          }
+
+          $vsRoot = Join-Path $internalRoot "libs\vapoursynth"
+          $runtimeRoot = Join-Path $internalRoot "python-runtime"
+          $sitePackages = Join-Path $internalRoot "python\site-packages"
+
+          $vspipe = Join-Path $vsRoot "vspipe.exe"
+
+          if (-not (Test-Path $vspipe)) {
+            throw "vspipe.exe not found: $vspipe"
+          }
+
+          $env:PYTHONHOME = (Resolve-Path $runtimeRoot).Path
+          $env:PYTHONPATH = (Resolve-Path $sitePackages).Path
+          $env:PATH = "$runtimeRoot;$vsRoot;$sitePackages;$env:PATH"
+          $env:VAPOURSYNTH_EXTRA_PLUGIN_PATH = (Resolve-Path (Join-Path $vsRoot "vs-plugins")).Path
+
+          # Use the VapourSynth CLI beside the bundled vspipe if present.
+          $vapoursynthExe = Get-ChildItem -Path $vsRoot -Recurse -Filter "vapoursynth.exe" |
+            Select-Object -First 1
+
+          if ($null -eq $vapoursynthExe) {
+            throw "vapoursynth.exe not found in bundled VapourSynth folder. The PyPI package layout changed or it was trimmed."
+          }
+
+          & $vapoursynthExe.FullName config
+          if ($LASTEXITCODE -ne 0) {
+            throw "vapoursynth config failed with exit code $LASTEXITCODE"
+          }
+
+          & $vspipe --version
+          if ($LASTEXITCODE -ne 0) {
+            throw "Bundled vspipe failed after vapoursynth config"
+          }
+
       - name: Create release files
         shell: pwsh
         run: |
@@ -308,40 +378,6 @@ jobs:
           $releaseDir = Join-Path $env:RUNNER_TEMP "release"
           New-Item -ItemType Directory -Force -Path $releaseDir | Out-Null
           Copy-Item -Recurse -Force -Path ".\dist\VidSmoother" -Destination $releaseDir
-
-          # Trim files that are not needed at runtime.
-          # This is conservative: removes caches, tests, source maps, debug symbols, static libs, and Python bytecode.
-          $trimPatterns = @(
-            "__pycache__",
-            ".pytest_cache",
-            "tests",
-            "test",
-            "*.pyc",
-            "*.pyo",
-            "*.pdb",
-            "*.lib",
-            "*.exp",
-            "*.map",
-            "*.ilk",
-            "*.iobj",
-            "*.ipdb",
-            "*.a",
-            "*.h",
-            "*.hpp",
-            "*.c",
-            "*.cpp",
-            "*.cu",
-            "*.cuh",
-            "*.md",
-            "*.rst",
-            "*.html",
-            "*.js.map"
-          )
-
-          foreach ($pattern in $trimPatterns) {
-            Get-ChildItem -Path $releaseDir -Recurse -Force -ErrorAction SilentlyContinue -Filter $pattern |
-              Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-          }
 
           $notes = @"
           VidSmoother Windows 11 NVIDIA package
