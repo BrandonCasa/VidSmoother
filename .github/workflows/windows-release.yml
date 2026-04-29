@@ -18,7 +18,7 @@ on:
         default: latest
         type: string
       vapoursynth_release:
-        description: vapoursynth/vapoursynth release tag, or latest
+        description: VapourSynth PyPI version, release tag like R74, or latest
         required: true
         default: latest
         type: string
@@ -126,11 +126,15 @@ jobs:
             -AssetPattern "^ffmpeg-master-.*-win64-gpl\.zip$" `
             -Destination (Join-Path $downloadDir "ffmpeg.zip")
 
-          Save-ReleaseAsset `
-            -Repository "vapoursynth/vapoursynth" `
-            -Tag "${{ inputs.vapoursynth_release }}" `
-            -AssetPattern "^VapourSynth64-Portable-.*\.zip$" `
-            -Destination (Join-Path $downloadDir "vapoursynth.zip")
+          $vapourSynthInput = "${{ inputs.vapoursynth_release }}"
+          if ($vapourSynthInput -eq "latest") {
+            "VAPOURSYNTH_PACKAGE_SPEC=vapoursynth" | Out-File -FilePath $env:GITHUB_ENV -Append
+            "VAPOURSYNTH_VERSION_LABEL=latest" | Out-File -FilePath $env:GITHUB_ENV -Append
+          } else {
+            $vapourSynthVersion = $vapourSynthInput -replace "^[Rr]", ""
+            "VAPOURSYNTH_PACKAGE_SPEC=vapoursynth==$vapourSynthVersion" | Out-File -FilePath $env:GITHUB_ENV -Append
+            "VAPOURSYNTH_VERSION_LABEL=$vapourSynthInput" | Out-File -FilePath $env:GITHUB_ENV -Append
+          }
 
           Save-ReleaseAsset `
             -Repository "HomeOfAviSynthPlusEvolution/L-SMASH-Works" `
@@ -154,13 +158,6 @@ jobs:
           }
           Copy-Item -Path $ffmpegBin.FullName, $ffprobeBin.FullName -Destination (Join-Path $env:BUNDLE_ROOT "libs\ffmpeg")
 
-          Expand-Archive -Path (Join-Path $downloadDir "vapoursynth.zip") -DestinationPath (Join-Path $extractDir "vapoursynth") -Force
-          $vspipeBin = Get-ChildItem -Path (Join-Path $extractDir "vapoursynth") -Recurse -Filter "vspipe.exe" | Select-Object -First 1
-          if ($null -eq $vspipeBin) {
-            throw "VapourSynth portable release did not contain vspipe.exe."
-          }
-          Copy-Item -Recurse -Force -Path (Join-Path $vspipeBin.Directory.FullName "*") -Destination (Join-Path $env:BUNDLE_ROOT "libs\vapoursynth")
-
           7z x (Join-Path $downloadDir "lsmash.7z") "-o$(Join-Path $extractDir "lsmash")" -y
           $lsmashPlugin = Get-ChildItem -Path (Join-Path $extractDir "lsmash") -Recurse -Include "*lsmash*.dll", "LSMASHSource.dll" |
             Where-Object { $_.FullName -match "\\x64\\" -or $_.DirectoryName -match "x64|VapourSynth" } |
@@ -181,12 +178,18 @@ jobs:
           $python = ".\.venv-build\Scripts\python.exe"
           & $python -m pip install --upgrade pip packaging setuptools wheel pyinstaller
           & $python -m pip install --upgrade torch torchvision torch_tensorrt --extra-index-url $env:TORCH_INDEX_URL --extra-index-url $env:NVIDIA_PYPI_URL
-          & $python -m pip install --upgrade vapoursynth ".\extern\vs-rife"
+          & $python -m pip install --upgrade $env:VAPOURSYNTH_PACKAGE_SPEC ".\extern\vs-rife"
           & $python -m pip check
 
           & $python -m pip install --upgrade `
             --target $env:RUNTIME_SITE_PACKAGES `
-            packaging setuptools wheel vapoursynth ".\extern\vs-rife"
+            packaging setuptools wheel $env:VAPOURSYNTH_PACKAGE_SPEC ".\extern\vs-rife"
+          $vapourSynthPackage = Join-Path $env:RUNTIME_SITE_PACKAGES "vapoursynth"
+          $vapourSynthBundle = Join-Path $env:BUNDLE_ROOT "libs\vapoursynth"
+          if (-not (Test-Path (Join-Path $vapourSynthPackage "vspipe.exe"))) {
+            throw "Installed VapourSynth package did not contain vspipe.exe."
+          }
+          Copy-Item -Recurse -Force -Path (Join-Path $vapourSynthPackage "*") -Destination $vapourSynthBundle
           & $python -m pip install --upgrade `
             --target $env:RUNTIME_SITE_PACKAGES `
             torch torchvision torch_tensorrt `
@@ -239,7 +242,7 @@ jobs:
           Included binary components:
           - Python: ${{ inputs.python_version }} embedded runtime from actions/setup-python
           - FFmpeg: $env:BTBN_FFMPEG_BUILDS_TAG ($env:BTBN_FFMPEG_BUILDS_ASSET)
-          - VapourSynth: $env:VAPOURSYNTH_VAPOURSYNTH_TAG ($env:VAPOURSYNTH_VAPOURSYNTH_ASSET)
+          - VapourSynth: $env:VAPOURSYNTH_VERSION_LABEL Python package
           - L-SMASH-Works: $env:HOMEOFAVISYNTHPLUSEVOLUTION_L_SMASH_WORKS_TAG ($env:HOMEOFAVISYNTHPLUSEVOLUTION_L_SMASH_WORKS_ASSET)
           - Python runtime/packages are embedded in VidSmoother.exe by PyInstaller.
 
