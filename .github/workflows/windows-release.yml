@@ -264,7 +264,10 @@ jobs:
           $runtimeRoot = Join-Path $env:BUNDLE_ROOT "python-runtime"
           Copy-Item -Recurse -Force -Path (Join-Path $pythonHome "DLLs") -Destination $runtimeRoot
           Copy-Item -Recurse -Force -Path (Join-Path $pythonHome "Lib") -Destination $runtimeRoot
+          Copy-Item -Force -Path (Join-Path $pythonHome "python.exe") -Destination $runtimeRoot
+          Copy-Item -Force -Path (Join-Path $pythonHome "pythonw.exe") -Destination $runtimeRoot -ErrorAction SilentlyContinue
           Copy-Item -Force -Path (Join-Path $pythonHome "python*.dll") -Destination $runtimeRoot
+          Copy-Item -Force -Path (Join-Path $pythonHome "python*.*") -Destination $runtimeRoot -ErrorAction SilentlyContinue
           Copy-Item -Force -Path (Join-Path $pythonHome "vcruntime*.dll") -Destination $runtimeRoot -ErrorAction SilentlyContinue
 
       - name: Build onedir app
@@ -281,50 +284,6 @@ jobs:
             --add-data "$env:BUNDLE_ROOT\python;python" `
             --add-data "$env:BUNDLE_ROOT\python-runtime;python-runtime" `
             ".\main.py"
-
-      - name: Smoke test exe
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          .\dist\VidSmoother\VidSmoother.exe --help
-
-          $pluginDir = Join-Path ".\dist\VidSmoother\_internal\libs\vapoursynth\vs-plugins" ""
-          if (-not (Test-Path $pluginDir)) {
-            $pluginDir = Join-Path ".\dist\VidSmoother\libs\vapoursynth\vs-plugins" ""
-          }
-
-          if (-not (Get-ChildItem -Path $pluginDir -Recurse -Filter "MiscFilters.dll" -ErrorAction SilentlyContinue)) {
-            throw "Bundled release is missing MiscFilters.dll"
-          }
-
-          if (-not (Get-ChildItem -Path $pluginDir -Recurse -Include "*lsmash*.dll", "LSMASHSource.dll" -ErrorAction SilentlyContinue)) {
-            throw "Bundled release is missing L-SMASH VapourSynth plugin dll"
-          }
-
-          $vsRoot = ".\dist\VidSmoother\_internal\libs\vapoursynth"
-          if (-not (Test-Path $vsRoot)) {
-            $vsRoot = ".\dist\VidSmoother\libs\vapoursynth"
-          }
-
-          $runtimeRoot = ".\dist\VidSmoother\_internal\python-runtime"
-          if (-not (Test-Path $runtimeRoot)) {
-            $runtimeRoot = ".\dist\VidSmoother\python-runtime"
-          }
-
-          $sitePackages = ".\dist\VidSmoother\_internal\python\site-packages"
-          if (-not (Test-Path $sitePackages)) {
-            $sitePackages = ".\dist\VidSmoother\python\site-packages"
-          }
-
-          $env:PYTHONHOME = (Resolve-Path $runtimeRoot).Path
-          $env:PYTHONPATH = (Resolve-Path $sitePackages).Path
-          $env:PATH = "$runtimeRoot;$vsRoot;$sitePackages;$env:PATH"
-          $env:VAPOURSYNTH_EXTRA_PLUGIN_PATH = (Resolve-Path (Join-Path $vsRoot "vs-plugins")).Path
-
-          & (Join-Path $vsRoot "vspipe.exe") --version
-          if ($LASTEXITCODE -ne 0) {
-            throw "Bundled vspipe could not initialize VSScript"
-          }
 
       - name: Configure bundled VapourSynth Python binding
         shell: pwsh
@@ -369,6 +328,50 @@ jobs:
           & $vspipe --version
           if ($LASTEXITCODE -ne 0) {
             throw "Bundled vspipe failed after vapoursynth config"
+          }
+
+      - name: Smoke test exe
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          .\dist\VidSmoother\VidSmoother.exe --help
+
+          $pluginDir = Join-Path ".\dist\VidSmoother\_internal\libs\vapoursynth\vs-plugins" ""
+          if (-not (Test-Path $pluginDir)) {
+            $pluginDir = Join-Path ".\dist\VidSmoother\libs\vapoursynth\vs-plugins" ""
+          }
+
+          if (-not (Get-ChildItem -Path $pluginDir -Recurse -Filter "MiscFilters.dll" -ErrorAction SilentlyContinue)) {
+            throw "Bundled release is missing MiscFilters.dll"
+          }
+
+          if (-not (Get-ChildItem -Path $pluginDir -Recurse -Include "*lsmash*.dll", "LSMASHSource.dll" -ErrorAction SilentlyContinue)) {
+            throw "Bundled release is missing L-SMASH VapourSynth plugin dll"
+          }
+
+          $vsRoot = ".\dist\VidSmoother\_internal\libs\vapoursynth"
+          if (-not (Test-Path $vsRoot)) {
+            $vsRoot = ".\dist\VidSmoother\libs\vapoursynth"
+          }
+
+          $runtimeRoot = ".\dist\VidSmoother\_internal\python-runtime"
+          if (-not (Test-Path $runtimeRoot)) {
+            $runtimeRoot = ".\dist\VidSmoother\python-runtime"
+          }
+
+          $sitePackages = ".\dist\VidSmoother\_internal\python\site-packages"
+          if (-not (Test-Path $sitePackages)) {
+            $sitePackages = ".\dist\VidSmoother\python\site-packages"
+          }
+
+          $env:PYTHONHOME = (Resolve-Path $runtimeRoot).Path
+          $env:PYTHONPATH = (Resolve-Path $sitePackages).Path
+          $env:PATH = "$runtimeRoot;$vsRoot;$sitePackages;$env:PATH"
+          $env:VAPOURSYNTH_EXTRA_PLUGIN_PATH = (Resolve-Path (Join-Path $vsRoot "vs-plugins")).Path
+
+          & (Join-Path $vsRoot "vspipe.exe") --version
+          if ($LASTEXITCODE -ne 0) {
+            throw "Bundled vspipe could not initialize VSScript"
           }
 
       - name: Create release files
