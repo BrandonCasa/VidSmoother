@@ -67,7 +67,6 @@ jobs:
           New-Item -ItemType Directory -Force -Path (Join-Path $bundleRoot "libs\vapoursynth\vs-plugins") | Out-Null
           New-Item -ItemType Directory -Force -Path (Join-Path $bundleRoot "python-runtime") | Out-Null
           New-Item -ItemType Directory -Force -Path $runtimePython | Out-Null
-          New-Item -ItemType Directory -Force -Path (Join-Path $bundleRoot "python-scripts") | Out-Null
           "BUNDLE_ROOT=$bundleRoot" | Out-File -FilePath $env:GITHUB_ENV -Append
           "RUNTIME_SITE_PACKAGES=$runtimePython" | Out-File -FilePath $env:GITHUB_ENV -Append
 
@@ -175,56 +174,27 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-
           python -m venv .venv-build
           $python = ".\.venv-build\Scripts\python.exe"
-          $scriptsDir = ".\.venv-build\Scripts"
-
           & $python -m pip install --upgrade pip packaging setuptools wheel pyinstaller
-
-          & $python -m pip install --upgrade `
-            torch torchvision torch_tensorrt `
-            --extra-index-url $env:TORCH_INDEX_URL `
-            --extra-index-url $env:NVIDIA_PYPI_URL
-
+          & $python -m pip install --upgrade torch torchvision torch_tensorrt --extra-index-url $env:TORCH_INDEX_URL --extra-index-url $env:NVIDIA_PYPI_URL
           & $python -m pip install --upgrade $env:VAPOURSYNTH_PACKAGE_SPEC ".\extern\vs-rife"
-
           & $python -m pip check
 
           & $python -m pip install --upgrade `
             --target $env:RUNTIME_SITE_PACKAGES `
             packaging setuptools wheel $env:VAPOURSYNTH_PACKAGE_SPEC ".\extern\vs-rife"
-
           $vapourSynthPackage = Join-Path $env:RUNTIME_SITE_PACKAGES "vapoursynth"
           $vapourSynthBundle = Join-Path $env:BUNDLE_ROOT "libs\vapoursynth"
-
           if (-not (Test-Path (Join-Path $vapourSynthPackage "vspipe.exe"))) {
             throw "Installed VapourSynth package did not contain vspipe.exe."
           }
-
           Copy-Item -Recurse -Force -Path (Join-Path $vapourSynthPackage "*") -Destination $vapourSynthBundle
-
-          # Preserve venv Scripts because VapourSynth installs vapoursynth.exe there.
-          $bundleScriptsDir = Join-Path $env:BUNDLE_ROOT "python-scripts"
-          New-Item -ItemType Directory -Force -Path $bundleScriptsDir | Out-Null
-          Copy-Item -Recurse -Force -Path (Join-Path $scriptsDir "*") -Destination $bundleScriptsDir
-
-          if (-not (Test-Path (Join-Path $bundleScriptsDir "vapoursynth.exe"))) {
-            throw "vapoursynth.exe was not copied into bundled python-scripts."
-          }
-
-          if (-not (Test-Path (Join-Path $bundleScriptsDir "vspipe.exe"))) {
-            Write-Host "vspipe.exe was not found in python-scripts; bundled VapourSynth copy will be used from libs\vapoursynth."
-          }
-
           & $python -m pip install --upgrade `
             --target $env:RUNTIME_SITE_PACKAGES `
             torch torchvision torch_tensorrt `
             --extra-index-url $env:TORCH_INDEX_URL `
             --extra-index-url $env:NVIDIA_PYPI_URL
-
-          # Copy Scripts again after Torch install in case additional runtime executables/DLL-adjacent launchers were added.
-          Copy-Item -Recurse -Force -Path (Join-Path $scriptsDir "*") -Destination $bundleScriptsDir
 
       - name: Install VapourSynth misc plugin
         shell: pwsh
@@ -313,7 +283,6 @@ jobs:
             --add-data "$env:BUNDLE_ROOT\libs;libs" `
             --add-data "$env:BUNDLE_ROOT\python;python" `
             --add-data "$env:BUNDLE_ROOT\python-runtime;python-runtime" `
-            --add-data "$env:BUNDLE_ROOT\python-scripts;python-scripts" `
             ".\main.py"
 
       - name: Configure bundled VapourSynth Python binding
@@ -338,20 +307,19 @@ jobs:
             throw "vspipe.exe not found: $vspipe"
           }
 
-          $scriptsRoot = Join-Path $internalRoot "python-scripts"
-
           $env:PYTHONHOME = (Resolve-Path $runtimeRoot).Path
           $env:PYTHONPATH = (Resolve-Path $sitePackages).Path
-          $env:PATH = "$scriptsRoot;$runtimeRoot;$vsRoot;$sitePackages;$env:PATH"
+          $env:PATH = "$runtimeRoot;$vsRoot;$sitePackages;$env:PATH"
           $env:VAPOURSYNTH_EXTRA_PLUGIN_PATH = (Resolve-Path (Join-Path $vsRoot "vs-plugins")).Path
 
-          $vapoursynthExe = Join-Path $scriptsRoot "vapoursynth.exe"
+          $vapoursynthExe = Get-ChildItem -Path $vsRoot -Recurse -Filter "vapoursynth.exe" |
+            Select-Object -First 1
 
-          if (-not (Test-Path $vapoursynthExe)) {
-            throw "vapoursynth.exe not found in bundled python-scripts: $vapoursynthExe"
+          if ($null -eq $vapoursynthExe) {
+            throw "vapoursynth.exe not found in bundled VapourSynth folder."
           }
 
-          & $vapoursynthExe config
+          & $vapoursynthExe.FullName config
           if ($LASTEXITCODE -ne 0) {
             throw "vapoursynth config failed with exit code $LASTEXITCODE"
           }
@@ -395,12 +363,6 @@ jobs:
             $sitePackages = ".\dist\VidSmoother\python\site-packages"
           }
 
-          $scriptsRoot = ".\dist\VidSmoother\_internal\python-scripts"
-          if (-not (Test-Path $scriptsRoot)) {
-            $scriptsRoot = ".\dist\VidSmoother\python-scripts"
-          }
-
-          $env:PATH = "$scriptsRoot;$runtimeRoot;$vsRoot;$sitePackages;$env:PATH"
           $env:PYTHONHOME = (Resolve-Path $runtimeRoot).Path
           $env:PYTHONPATH = (Resolve-Path $sitePackages).Path
           $env:PATH = "$runtimeRoot;$vsRoot;$sitePackages;$env:PATH"
