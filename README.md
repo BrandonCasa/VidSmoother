@@ -54,8 +54,8 @@ To build the release executable, use the GitHub Actions workflow instead of a lo
 1. Open GitHub Actions.
 2. Select `Windows NVIDIA Release`.
 3. Click `Run workflow`.
-4. Set `version`, `python_version`, and release tags for `ffmpeg_release`, `vapoursynth_release`, and `lsmash_release`.
-5. Leave a component input as `latest` to use that project's latest GitHub release.
+4. Set `version`, `python_version`, release tags for `ffmpeg_release` and `lsmash_release`, and a PyPI version or release tag such as `R74` for `vapoursynth_release`.
+5. Leave a component input as `latest` to use the latest matching release or package.
 6. Set `publish_release` to `true` only when you want the workflow to create a GitHub release.
 
 The workflow is manual-only. It does not run on pushes, pull requests, tags, schedules, or release events.
