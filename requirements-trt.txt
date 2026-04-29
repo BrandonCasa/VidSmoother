@@ -1,0 +1,5 @@
+packaging
+setuptools
+wheel
+vapoursynth
+vsrife

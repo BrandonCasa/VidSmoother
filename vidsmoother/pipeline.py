@@ -1,15 +1,12 @@
 from __future__ import annotations
 
-import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from .config import PipelineConfig
-from .errors import VidSmootherError
 from .media import VideoInfo, iter_videos, probe_video
-from .runner import run_command
-from .scenes import Scene, detect_scenes
-from .subtitles import escape_subtitle_path, matching_subtitle
+from .runner import run_vspipe_to_ffmpeg
+from .vpy import write_vapoursynth_script
 
 
 def process_all(config: PipelineConfig) -> None:
@@ -20,6 +17,7 @@ def process_all(config: PipelineConfig) -> None:
 
     config.output_dir.mkdir(parents=True, exist_ok=True)
     config.work_dir.mkdir(parents=True, exist_ok=True)
+    config.rife.trt_cache_dir.mkdir(parents=True, exist_ok=True)
 
     if config.workers <= 1 or len(videos) == 1:
         for video in videos:
@@ -41,152 +39,69 @@ def process_video(video: Path, config: PipelineConfig) -> Path:
 
     video_work = config.work_dir / video.stem
     logs = video_work / "logs"
-    frames = video_work / "frames"
-    interpolated = video_work / "interpolated"
-    combined = video_work / "combined"
-
-    if video_work.exists() and not config.keep_work:
-        shutil.rmtree(video_work)
-    for directory in [logs, frames, interpolated, combined]:
-        directory.mkdir(parents=True, exist_ok=True)
+    script = video_work / f"{video.stem}.vpy"
+    logs.mkdir(parents=True, exist_ok=True)
 
     print(
         f"Processing {video.name}: {info.width}x{info.height}, "
-        f"{info.fps:.3f}fps -> {info.fps * 2:.3f}fps"
+        f"{info.fps:.3f}fps x {config.rife.factor_num}/{config.rife.factor_den} via TensorRT"
     )
 
-    scenes = detect_scenes(video, info, mode=config.scene_mode, threshold=config.scene_threshold)
-    print(f"  Scenes: {len(scenes)}")
-
-    for scene in scenes:
-        extract_scene_frames(video, scene, frames / scene_name(scene), config, logs)
-        interpolate_scene(scene, frames / scene_name(scene), interpolated / scene_name(scene), config, logs)
-
-    collect_frames(scenes, interpolated, combined)
-    encode_video(info, combined, output, config, logs)
-
-    if not config.keep_work and not config.dry_run:
-        shutil.rmtree(video_work, ignore_errors=True)
+    write_vapoursynth_script(video, info, script, config)
+    run_vspipe_to_ffmpeg(
+        build_vspipe_command(script, config),
+        build_ffmpeg_command(info, output, config),
+        vspipe_log=logs / "vspipe.log",
+        ffmpeg_log=logs / "ffmpeg.log",
+        dry_run=config.dry_run,
+    )
 
     print(f"  Output: {output}")
     return output
 
 
 def output_path_for(video: Path, config: PipelineConfig) -> Path:
-    return config.output_dir / f"{video.stem}_rife_2x.mp4"
+    suffix = "trt_rife"
+    return config.output_dir / f"{video.stem}_{suffix}_{config.rife.factor_num}x.mp4"
 
 
-def scene_name(scene: Scene) -> str:
-    return f"scene_{scene.index:04d}"
+def build_vspipe_command(script: Path, config: PipelineConfig) -> list[object]:
+    return [config.tools.vspipe, "--container", "y4m", script, "-"]
 
 
-def extract_scene_frames(
-    video: Path,
-    scene: Scene,
-    output_dir: Path,
-    config: PipelineConfig,
-    logs: Path,
-) -> None:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    command: list[object] = [
-        config.tools.ffmpeg,
-        "-y",
-        "-ss",
-        f"{scene.start:.6f}",
-        "-i",
-        video,
-        "-t",
-        f"{scene.end - scene.start:.6f}",
-        "-vsync",
-        "0",
-        "-q:v",
-        "2",
-        output_dir / "frame_%08d.png",
-    ]
-    run_command(command, log_file=logs / f"extract_{scene_name(scene)}.log", dry_run=config.dry_run)
-
-
-def interpolate_scene(
-    scene: Scene,
-    input_dir: Path,
-    output_dir: Path,
-    config: PipelineConfig,
-    logs: Path,
-) -> None:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    command: list[object] = [
-        config.tools.rife,
-        "-i",
-        input_dir,
-        "-o",
-        output_dir,
-    ]
-    if config.tools.rife_model is not None:
-        command.extend(["-m", config.tools.rife_model])
-    if config.rife.gpu:
-        command.extend(["-g", config.rife.gpu])
-    if config.rife.threads:
-        command.extend(["-j", config.rife.threads])
-    if config.rife.tta_spatial:
-        command.append("-x")
-    if config.rife.tta_temporal:
-        command.append("-z")
-    if config.rife.uhd:
-        command.append("-u")
-    command.extend(["-f", config.rife.output_pattern])
-    run_command(command, log_file=logs / f"rife_{scene_name(scene)}.log", dry_run=config.dry_run)
-
-
-def collect_frames(scenes: list[Scene], interpolated: Path, combined: Path) -> None:
-    combined.mkdir(parents=True, exist_ok=True)
-    frame_number = 1
-    for scene in scenes:
-        scene_dir = interpolated / scene_name(scene)
-        frames = sorted(scene_dir.glob("*.png")) + sorted(scene_dir.glob("*.jpg")) + sorted(scene_dir.glob("*.webp"))
-        for frame in sorted(frames):
-            shutil.copy2(frame, combined / f"frame_{frame_number:08d}{frame.suffix.lower()}")
-            frame_number += 1
-    if frame_number == 1:
-        raise VidSmootherError(f"No interpolated frames found under {interpolated}")
-
-
-def encode_video(info: VideoInfo, frames_dir: Path, output: Path, config: PipelineConfig, logs: Path) -> None:
+def build_ffmpeg_command(info: VideoInfo, output: Path, config: PipelineConfig) -> list[object]:
     output.parent.mkdir(parents=True, exist_ok=True)
-    first_frame = next(iter(sorted(frames_dir.glob("frame_*"))), None)
-    if first_frame is None:
-        raise VidSmootherError(f"No frames found in {frames_dir}")
-
-    input_pattern = frames_dir / f"frame_%08d{first_frame.suffix.lower()}"
     command: list[object] = [
         config.tools.ffmpeg,
         "-y",
-        "-framerate",
-        f"{info.fps * 2:.6f}",
         "-i",
-        input_pattern,
+        "pipe:0",
         "-i",
         info.path,
         "-map",
         "0:v:0",
     ]
+
     if info.has_audio:
         command.extend(["-map", "1:a:0?"])
 
-    command.extend(["-c:v", config.encode.video_codec])
-    if config.encode.preset:
-        command.extend(["-preset", config.encode.preset])
-    if config.encode.crf is not None:
-        command.extend(["-crf", str(config.encode.crf)])
-    if config.encode.video_bitrate:
-        command.extend(["-b:v", config.encode.video_bitrate])
-    command.extend(["-pix_fmt", config.encode.pix_fmt])
+    command.extend(["-c:v", config.nvenc.codec, "-preset", config.nvenc.preset, "-rc", config.nvenc.rate_control])
 
-    subtitle = matching_subtitle(info.path)
-    if subtitle and config.subtitle_mode == "burn":
-        command.extend(["-vf", escape_subtitle_path(subtitle)])
+    if config.nvenc.cq is not None:
+        command.extend(["-cq", str(config.nvenc.cq)])
+    if config.nvenc.qp is not None:
+        command.extend(["-qp", str(config.nvenc.qp)])
+    if config.nvenc.bitrate:
+        command.extend(["-b:v", config.nvenc.bitrate])
+    if config.nvenc.maxrate:
+        command.extend(["-maxrate", config.nvenc.maxrate])
+    if config.nvenc.bufsize:
+        command.extend(["-bufsize", config.nvenc.bufsize])
+
+    command.extend(["-pix_fmt", config.nvenc.pix_fmt])
 
     if info.has_audio:
-        command.extend(["-c:a", config.encode.audio_codec])
-    command.extend(["-movflags", "+faststart", output])
+        command.extend(["-c:a", config.nvenc.audio_codec])
 
-    run_command(command, log_file=logs / "encode.log", dry_run=config.dry_run)
+    command.extend(["-movflags", "+faststart", output])
+    return command

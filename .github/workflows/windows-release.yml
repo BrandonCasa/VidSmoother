@@ -1,0 +1,285 @@
+name: Windows NVIDIA Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version or label, for example v0.1.0
+        required: true
+        type: string
+      python_version:
+        description: Python version to embed, for example 3.12
+        required: true
+        default: "3.12"
+        type: string
+      ffmpeg_release:
+        description: BtbN/FFmpeg-Builds release tag, or latest
+        required: true
+        default: latest
+        type: string
+      vapoursynth_release:
+        description: vapoursynth/vapoursynth release tag, or latest
+        required: true
+        default: latest
+        type: string
+      lsmash_release:
+        description: HomeOfAviSynthPlusEvolution/L-SMASH-Works release tag, or latest
+        required: true
+        default: latest
+        type: string
+      publish_release:
+        description: Publish a GitHub release with the built exe and zip
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+env:
+  TORCH_INDEX_URL: https://download.pytorch.org/whl/cu130
+  NVIDIA_PYPI_URL: https://pypi.nvidia.com
+  PACKAGE_NAME: VidSmoother-windows11-nvidia
+
+jobs:
+  build-windows-release:
+    name: Build Windows 11 NVIDIA exe
+    runs-on: windows-2025
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python_version }}
+
+      - name: Prepare build layout
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $bundleRoot = Join-Path $env:RUNNER_TEMP "bundle"
+          $runtimePython = Join-Path $bundleRoot "python\site-packages"
+          New-Item -ItemType Directory -Force -Path (Join-Path $bundleRoot "libs\ffmpeg") | Out-Null
+          New-Item -ItemType Directory -Force -Path (Join-Path $bundleRoot "libs\vapoursynth\vs-plugins") | Out-Null
+          New-Item -ItemType Directory -Force -Path (Join-Path $bundleRoot "python-runtime") | Out-Null
+          New-Item -ItemType Directory -Force -Path $runtimePython | Out-Null
+          "BUNDLE_ROOT=$bundleRoot" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "RUNTIME_SITE_PACKAGES=$runtimePython" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Resolve selected release assets
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          function Get-GitHubRelease {
+            param(
+              [Parameter(Mandatory)] [string] $Repository,
+              [Parameter(Mandatory)] [string] $Tag
+            )
+            $headers = @{
+              "Accept" = "application/vnd.github+json"
+              "Authorization" = "Bearer $env:GITHUB_TOKEN"
+              "X-GitHub-Api-Version" = "2022-11-28"
+              "User-Agent" = "VidSmoother-Release-Build"
+            }
+            if ($Tag -eq "latest") {
+              $uri = "https://api.github.com/repos/$Repository/releases/latest"
+            } else {
+              $uri = "https://api.github.com/repos/$Repository/releases/tags/$Tag"
+            }
+            Invoke-RestMethod -Headers $headers -Uri $uri
+          }
+
+          function Save-ReleaseAsset {
+            param(
+              [Parameter(Mandatory)] [string] $Repository,
+              [Parameter(Mandatory)] [string] $Tag,
+              [Parameter(Mandatory)] [string] $AssetPattern,
+              [Parameter(Mandatory)] [string] $Destination
+            )
+            $release = Get-GitHubRelease -Repository $Repository -Tag $Tag
+            $asset = $release.assets | Where-Object { $_.name -match $AssetPattern } | Select-Object -First 1
+            if ($null -eq $asset) {
+              $names = ($release.assets | ForEach-Object { $_.name }) -join ", "
+              throw "No asset matching '$AssetPattern' found in $Repository release '$($release.tag_name)'. Assets: $names"
+            }
+            Invoke-WebRequest -Headers @{ "User-Agent" = "VidSmoother-Release-Build" } -Uri $asset.browser_download_url -OutFile $Destination
+            $envPrefix = ($Repository -replace "[^A-Za-z0-9]", "_").ToUpperInvariant()
+            "$($envPrefix)_TAG=$($release.tag_name)" | Out-File -FilePath $env:GITHUB_ENV -Append
+            "$($envPrefix)_ASSET=$($asset.name)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          }
+
+          $downloadDir = Join-Path $env:RUNNER_TEMP "downloads"
+          New-Item -ItemType Directory -Force -Path $downloadDir | Out-Null
+
+          Save-ReleaseAsset `
+            -Repository "BtbN/FFmpeg-Builds" `
+            -Tag "${{ inputs.ffmpeg_release }}" `
+            -AssetPattern "^ffmpeg-master-.*-win64-gpl\.zip$" `
+            -Destination (Join-Path $downloadDir "ffmpeg.zip")
+
+          Save-ReleaseAsset `
+            -Repository "vapoursynth/vapoursynth" `
+            -Tag "${{ inputs.vapoursynth_release }}" `
+            -AssetPattern "^VapourSynth64-Portable-.*\.zip$" `
+            -Destination (Join-Path $downloadDir "vapoursynth.zip")
+
+          Save-ReleaseAsset `
+            -Repository "HomeOfAviSynthPlusEvolution/L-SMASH-Works" `
+            -Tag "${{ inputs.lsmash_release }}" `
+            -AssetPattern "^L-SMASH-Works-.*\.7z$" `
+            -Destination (Join-Path $downloadDir "lsmash.7z")
+
+      - name: Extract binary tools
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $downloadDir = Join-Path $env:RUNNER_TEMP "downloads"
+          $extractDir = Join-Path $env:RUNNER_TEMP "extracted"
+          New-Item -ItemType Directory -Force -Path $extractDir | Out-Null
+
+          Expand-Archive -Path (Join-Path $downloadDir "ffmpeg.zip") -DestinationPath (Join-Path $extractDir "ffmpeg") -Force
+          $ffmpegBin = Get-ChildItem -Path (Join-Path $extractDir "ffmpeg") -Recurse -Filter "ffmpeg.exe" | Select-Object -First 1
+          $ffprobeBin = Get-ChildItem -Path (Join-Path $extractDir "ffmpeg") -Recurse -Filter "ffprobe.exe" | Select-Object -First 1
+          if ($null -eq $ffmpegBin -or $null -eq $ffprobeBin) {
+            throw "FFmpeg release did not contain ffmpeg.exe and ffprobe.exe."
+          }
+          Copy-Item -Path $ffmpegBin.FullName, $ffprobeBin.FullName -Destination (Join-Path $env:BUNDLE_ROOT "libs\ffmpeg")
+
+          Expand-Archive -Path (Join-Path $downloadDir "vapoursynth.zip") -DestinationPath (Join-Path $extractDir "vapoursynth") -Force
+          $vspipeBin = Get-ChildItem -Path (Join-Path $extractDir "vapoursynth") -Recurse -Filter "vspipe.exe" | Select-Object -First 1
+          if ($null -eq $vspipeBin) {
+            throw "VapourSynth portable release did not contain vspipe.exe."
+          }
+          Copy-Item -Recurse -Force -Path (Join-Path $vspipeBin.Directory.FullName "*") -Destination (Join-Path $env:BUNDLE_ROOT "libs\vapoursynth")
+
+          7z x (Join-Path $downloadDir "lsmash.7z") "-o$(Join-Path $extractDir "lsmash")" -y
+          $lsmashPlugin = Get-ChildItem -Path (Join-Path $extractDir "lsmash") -Recurse -Include "*lsmash*.dll", "LSMASHSource.dll" |
+            Where-Object { $_.FullName -match "\\x64\\" -or $_.DirectoryName -match "x64|VapourSynth" } |
+            Select-Object -First 1
+          if ($null -eq $lsmashPlugin) {
+            $lsmashPlugin = Get-ChildItem -Path (Join-Path $extractDir "lsmash") -Recurse -Include "*lsmash*.dll", "LSMASHSource.dll" | Select-Object -First 1
+          }
+          if ($null -eq $lsmashPlugin) {
+            throw "L-SMASH-Works release did not contain a VapourSynth plugin dll."
+          }
+          Copy-Item -Path $lsmashPlugin.FullName -Destination (Join-Path $env:BUNDLE_ROOT "libs\vapoursynth\vs-plugins")
+
+      - name: Install Python build and runtime packages
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          python -m venv .venv-build
+          $python = ".\.venv-build\Scripts\python.exe"
+          & $python -m pip install --upgrade pip packaging setuptools wheel pyinstaller
+          & $python -m pip install --upgrade torch torchvision torch_tensorrt --extra-index-url $env:TORCH_INDEX_URL --extra-index-url $env:NVIDIA_PYPI_URL
+          & $python -m pip install --upgrade vapoursynth ".\extern\vs-rife"
+          & $python -m pip check
+
+          & $python -m pip install --upgrade `
+            --target $env:RUNTIME_SITE_PACKAGES `
+            packaging setuptools wheel vapoursynth ".\extern\vs-rife"
+          & $python -m pip install --upgrade `
+            --target $env:RUNTIME_SITE_PACKAGES `
+            torch torchvision torch_tensorrt `
+            --extra-index-url $env:TORCH_INDEX_URL `
+            --extra-index-url $env:NVIDIA_PYPI_URL
+
+      - name: Copy embedded Python runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $pythonHome = python -c "import sys; print(sys.base_prefix)"
+          $runtimeRoot = Join-Path $env:BUNDLE_ROOT "python-runtime"
+          Copy-Item -Recurse -Force -Path (Join-Path $pythonHome "DLLs") -Destination $runtimeRoot
+          Copy-Item -Recurse -Force -Path (Join-Path $pythonHome "Lib") -Destination $runtimeRoot
+          Copy-Item -Force -Path (Join-Path $pythonHome "python*.dll") -Destination $runtimeRoot
+          Copy-Item -Force -Path (Join-Path $pythonHome "vcruntime*.dll") -Destination $runtimeRoot -ErrorAction SilentlyContinue
+
+      - name: Build one-file exe
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $python = ".\.venv-build\Scripts\python.exe"
+          & $python -m PyInstaller `
+            --clean `
+            --onefile `
+            --name VidSmoother `
+            --paths ".\extern\vs-rife" `
+            --add-data "$env:BUNDLE_ROOT\libs;libs" `
+            --add-data "$env:BUNDLE_ROOT\python;python" `
+            --add-data "$env:BUNDLE_ROOT\python-runtime;python-runtime" `
+            ".\main.py"
+
+      - name: Smoke test exe
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          .\dist\VidSmoother.exe --help
+
+      - name: Create release files
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $releaseDir = Join-Path $env:RUNNER_TEMP "release"
+          New-Item -ItemType Directory -Force -Path $releaseDir | Out-Null
+          Copy-Item -Path ".\dist\VidSmoother.exe" -Destination (Join-Path $releaseDir "VidSmoother.exe")
+
+          $notes = @"
+          VidSmoother Windows 11 NVIDIA package
+
+          Included binary components:
+          - Python: ${{ inputs.python_version }} embedded runtime from actions/setup-python
+          - FFmpeg: $env:BTBN_FFMPEG_BUILDS_TAG ($env:BTBN_FFMPEG_BUILDS_ASSET)
+          - VapourSynth: $env:VAPOURSYNTH_VAPOURSYNTH_TAG ($env:VAPOURSYNTH_VAPOURSYNTH_ASSET)
+          - L-SMASH-Works: $env:HOMEOFAVISYNTHPLUSEVOLUTION_L_SMASH_WORKS_TAG ($env:HOMEOFAVISYNTHPLUSEVOLUTION_L_SMASH_WORKS_ASSET)
+          - Python runtime/packages are embedded in VidSmoother.exe by PyInstaller.
+
+          Target machine requirements:
+          - Windows 11
+          - NVIDIA GPU with a current NVIDIA driver
+
+          Usage:
+          - Put input videos beside VidSmoother.exe in an input folder, or pass --input-dir.
+          - Run VidSmoother.exe --dry-run to verify commands.
+          - Run VidSmoother.exe --overwrite to process videos.
+
+          This workflow is manual-only and is not triggered by pushes, pull requests, tags, or releases.
+          "@
+          $notes | Set-Content -Path (Join-Path $releaseDir "README.txt") -Encoding ASCII
+
+          $zipName = "$($env:PACKAGE_NAME)-${{ inputs.version }}.zip"
+          $zipPath = Join-Path $env:RUNNER_TEMP $zipName
+          Compress-Archive -Path (Join-Path $releaseDir "*") -DestinationPath $zipPath -Force
+          "RELEASE_DIR=$releaseDir" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "ZIP_PATH=$zipPath" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Upload exe artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: VidSmoother.exe-${{ inputs.version }}
+          path: ${{ env.RELEASE_DIR }}\VidSmoother.exe
+          if-no-files-found: error
+
+      - name: Upload zip artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.PACKAGE_NAME }}-${{ inputs.version }}
+          path: ${{ env.ZIP_PATH }}
+          if-no-files-found: error
+
+      - name: Publish GitHub release
+        if: ${{ inputs.publish_release }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.version }}
+          name: VidSmoother ${{ inputs.version }} Windows 11 NVIDIA
+          files: |
+            ${{ env.RELEASE_DIR }}\VidSmoother.exe
+            ${{ env.ZIP_PATH }}
+          make_latest: false
+          generate_release_notes: true

@@ -1,14 +1,54 @@
 from __future__ import annotations
 
+import os
 import shutil
+import sys
 from pathlib import Path
 
 from .config import ToolPaths
 from .errors import ToolMissingError
 
 
-def repo_root() -> Path:
+def bundled_root() -> Path:
+    frozen_root = getattr(sys, "_MEIPASS", None)
+    if frozen_root:
+        return Path(frozen_root)
     return Path(__file__).resolve().parent.parent
+
+
+def repo_root() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent.parent
+
+
+def bundled_runtime_env() -> dict[str, str]:
+    root = bundled_root()
+    env = os.environ.copy()
+    python_runtime = root / "python-runtime"
+    path_entries = [
+        python_runtime,
+        python_runtime / "DLLs",
+        root / "libs" / "ffmpeg",
+        root / "libs" / "vapoursynth",
+        root / "libs" / "vapoursynth" / "core",
+    ]
+    python_entries = [
+        python_runtime / "Lib",
+        root / "python" / "site-packages",
+    ]
+
+    existing_path = env.get("PATH", "")
+    env["PATH"] = os.pathsep.join([str(path) for path in path_entries if path.exists()] + [existing_path])
+
+    existing_pythonpath = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = os.pathsep.join(
+        [str(path) for path in python_entries if path.exists()] + ([existing_pythonpath] if existing_pythonpath else [])
+    )
+    if python_runtime.exists():
+        env.setdefault("PYTHONHOME", str(python_runtime))
+
+    return env
 
 
 def _first_existing(candidates: list[Path]) -> Path | None:
@@ -53,12 +93,11 @@ def default_tool_paths(
     *,
     ffmpeg: str | None,
     ffprobe: str | None,
-    rife: str | None,
-    rife_model: str | None,
+    vspipe: str | None,
 ) -> ToolPaths:
-    root = repo_root()
-    rife_dir = root / "libs" / "rife-ncnn-vulkan"
+    root = bundled_root()
     ffmpeg_dir = root / "libs" / "ffmpeg"
+    vapoursynth_dir = root / "libs" / "vapoursynth"
 
     return ToolPaths(
         ffmpeg=resolve_executable(
@@ -71,13 +110,13 @@ def default_tool_paths(
             [ffmpeg_dir / "ffprobe.exe", ffmpeg_dir / "ffprobe"],
             ["ffprobe.exe", "ffprobe"],
         ),
-        rife=resolve_executable(
-            rife,
-            [rife_dir / "rife-ncnn-vulkan.exe", rife_dir / "rife-ncnn-vulkan"],
-            ["rife-ncnn-vulkan.exe", "rife-ncnn-vulkan"],
-        ),
-        rife_model=resolve_optional_path(
-            rife_model,
-            [rife_dir / "models" / "rife-v4.6", rife_dir / "models" / "rife-v4"],
+        vspipe=resolve_executable(
+            vspipe,
+            [
+                vapoursynth_dir / "vspipe.exe",
+                root / "venv" / "Scripts" / "vspipe.exe",
+                root / "venv" / "bin" / "vspipe",
+            ],
+            ["vspipe.exe", "vspipe"],
         ),
     )
