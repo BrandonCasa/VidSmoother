@@ -53,11 +53,9 @@ def default_tool_paths(
     *,
     ffmpeg: str | None,
     ffprobe: str | None,
-    rife: str | None,
-    rife_model: str | None,
+    vspipe: str | None,
 ) -> ToolPaths:
     root = repo_root()
-    rife_dir = root / "libs" / "rife-ncnn-vulkan"
     ffmpeg_dir = root / "libs" / "ffmpeg"
 
     return ToolPaths(
@@ -71,13 +69,9 @@ def default_tool_paths(
             [ffmpeg_dir / "ffprobe.exe", ffmpeg_dir / "ffprobe"],
             ["ffprobe.exe", "ffprobe"],
         ),
-        rife=resolve_executable(
-            rife,
-            [rife_dir / "rife-ncnn-vulkan.exe", rife_dir / "rife-ncnn-vulkan"],
-            ["rife-ncnn-vulkan.exe", "rife-ncnn-vulkan"],
-        ),
-        rife_model=resolve_optional_path(
-            rife_model,
-            [rife_dir / "models" / "rife-v4.6", rife_dir / "models" / "rife-v4"],
+        vspipe=resolve_executable(
+            vspipe,
+            [root / "venv" / "Scripts" / "vspipe.exe", root / "venv" / "bin" / "vspipe"],
+            ["vspipe.exe", "vspipe"],
         ),
     )

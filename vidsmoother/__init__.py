@@ -1,4 +1,4 @@
-"""Video interpolation pipeline powered by FFmpeg and RIFE ncnn Vulkan."""
+"""Video interpolation pipeline powered by VapourSynth, RIFE TensorRT, vspipe, and NVENC."""
 
 __all__ = ["__version__"]
 

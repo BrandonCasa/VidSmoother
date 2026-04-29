@@ -45,3 +45,42 @@ def run_command(
         detail = f" See log: {log_file}" if log_file else ""
         raise CommandError(f"Command failed with exit code {result.returncode}: {printable}.{detail}")
     return result
+
+
+def run_vspipe_to_ffmpeg(
+    vspipe_command: list[object],
+    ffmpeg_command: list[object],
+    *,
+    vspipe_log: Path,
+    ffmpeg_log: Path,
+    dry_run: bool = False,
+) -> None:
+    if dry_run:
+        print(f"[dry-run] {format_command(vspipe_command)} | {format_command(ffmpeg_command)}")
+        return
+
+    vspipe_log.parent.mkdir(parents=True, exist_ok=True)
+    ffmpeg_log.parent.mkdir(parents=True, exist_ok=True)
+
+    with vspipe_log.open("w", encoding="utf-8") as vp_log, ffmpeg_log.open("w", encoding="utf-8") as ff_log:
+        vspipe = subprocess.Popen(
+            [str(part) for part in vspipe_command],
+            stdout=subprocess.PIPE,
+            stderr=vp_log,
+        )
+        ffmpeg = subprocess.Popen(
+            [str(part) for part in ffmpeg_command],
+            stdin=vspipe.stdout,
+            stdout=ff_log,
+            stderr=ff_log,
+        )
+        if vspipe.stdout is not None:
+            vspipe.stdout.close()
+
+        ffmpeg_return = ffmpeg.wait()
+        vspipe_return = vspipe.wait()
+
+    if vspipe_return != 0:
+        raise CommandError(f"vspipe failed with exit code {vspipe_return}. See log: {vspipe_log}")
+    if ffmpeg_return != 0:
+        raise CommandError(f"ffmpeg failed with exit code {ffmpeg_return}. See log: {ffmpeg_log}")

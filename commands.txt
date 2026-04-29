@@ -1,3 +1,0 @@
-ffmpeg -i ./input/MEDIA.mp4 -qscale:v 2 ./input/frames3/frame_%08d.jpg
-./libs/rife_ncnn_vulkan/rife-ncnn-vulkan.exe -i ./input/frames3/ -o ./output/ -m ./libs/rife_ncnn_vulkan/rife-v4.6/ -v -g 0 -j 8:32:8 -f "frame_%08d.jpg"
-ffmpeg -hwaccel cuda -framerate 47.96 -i ./output/frame_%08d.png -i ./input/s4e3_out.mp4 -c:a copy -crf 16 -c:v hevc_nvenc -pix_fmt yuv420p ./output_48fps.mp4
