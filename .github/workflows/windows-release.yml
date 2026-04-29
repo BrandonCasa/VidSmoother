@@ -196,6 +196,38 @@ jobs:
             --extra-index-url $env:TORCH_INDEX_URL `
             --extra-index-url $env:NVIDIA_PYPI_URL
 
+      - name: Install VapourSynth misc plugin
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $python = ".\.venv-build\Scripts\python.exe"
+
+          # vsrife uses misc.SCDetect for scene-change detection.
+          # That namespace comes from MiscFilters.dll.
+          & $python -m pip install --upgrade vsrepo
+          & $python -m vsrepo update
+          & $python -m vsrepo install misc
+
+          $vsPluginDir = & $python -c "import vapoursynth as vs; print(vs.get_plugin_dir())"
+          if (-not (Test-Path $vsPluginDir)) {
+            throw "VapourSynth plugin dir does not exist: $vsPluginDir"
+          }
+
+          $miscPlugin = Get-ChildItem -Path $vsPluginDir -Recurse -Include "MiscFilters.dll", "*Misc*.dll" |
+            Select-Object -First 1
+
+          if ($null -eq $miscPlugin) {
+            throw "vsrepo installed misc, but MiscFilters.dll was not found in: $vsPluginDir"
+          }
+
+          $bundlePluginDir = Join-Path $env:BUNDLE_ROOT "libs\vapoursynth\vs-plugins"
+          New-Item -ItemType Directory -Force -Path $bundlePluginDir | Out-Null
+          Copy-Item -Force -Path $miscPlugin.FullName -Destination $bundlePluginDir
+
+          Write-Host "Bundled VapourSynth misc plugin:"
+          Write-Host $miscPlugin.FullName
+          Write-Host "-> $bundlePluginDir"
+
       - name: Copy embedded Python runtime
         shell: pwsh
         run: |
@@ -227,6 +259,19 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           .\dist\VidSmoother\VidSmoother.exe --help
+
+          $pluginDir = Join-Path ".\dist\VidSmoother\_internal\libs\vapoursynth\vs-plugins" ""
+          if (-not (Test-Path $pluginDir)) {
+            $pluginDir = Join-Path ".\dist\VidSmoother\libs\vapoursynth\vs-plugins" ""
+          }
+
+          if (-not (Get-ChildItem -Path $pluginDir -Recurse -Filter "MiscFilters.dll" -ErrorAction SilentlyContinue)) {
+            throw "Bundled release is missing MiscFilters.dll"
+          }
+
+          if (-not (Get-ChildItem -Path $pluginDir -Recurse -Include "*lsmash*.dll", "LSMASHSource.dll" -ErrorAction SilentlyContinue)) {
+            throw "Bundled release is missing L-SMASH VapourSynth plugin dll"
+          }
 
       - name: Create release files
         shell: pwsh
