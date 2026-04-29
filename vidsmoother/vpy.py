@@ -13,7 +13,8 @@ def write_vapoursynth_script(video: Path, info: VideoInfo, script_path: Path, co
 
 def render_script(video: Path, info: VideoInfo, config: PipelineConfig) -> str:
     source = _source_expression(video, config.vapoursynth.source_filter)
-    output_format = _output_format(config.nvenc.pix_fmt)
+    output_pix_fmt = info.pix_fmt if config.nvenc.pix_fmt == "auto" else config.nvenc.pix_fmt
+    output_format = _output_format(output_pix_fmt)
     precision_format = "vs.RGBH" if config.vapoursynth.fp16 else "vs.RGBS"
     max_cache = (
         f"core.max_cache_size = {config.vapoursynth.max_cache_size_mb}\n"
@@ -76,11 +77,15 @@ def _source_expression(video: Path, source_filter: str) -> str:
 
 def _output_format(pix_fmt: str) -> str:
     match pix_fmt:
-        case "yuv420p":
+        case "yuv420p" | "yuvj420p":
             return "vs.YUV420P8"
         case "yuv420p10le":
             return "vs.YUV420P10"
-        case "yuv444p":
+        case "yuv422p" | "yuvj422p":
+            return "vs.YUV422P8"
+        case "yuv422p10le":
+            return "vs.YUV422P10"
+        case "yuv444p" | "yuvj444p":
             return "vs.YUV444P8"
         case "yuv444p10le":
             return "vs.YUV444P10"

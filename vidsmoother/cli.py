@@ -57,7 +57,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--trt-opt-shape", default="1920x1080")
     parser.add_argument("--trt-max-shape", default="1920x1080")
 
-    parser.add_argument("--nvenc-codec", choices=["hevc_nvenc", "h264_nvenc", "av1_nvenc"], default="hevc_nvenc")
+    parser.add_argument(
+        "--nvenc-codec",
+        choices=["auto", "hevc_nvenc", "h264_nvenc", "av1_nvenc"],
+        default="auto",
+        help="Output video encoder. auto follows the input codec and uses NVENC when available.",
+    )
     parser.add_argument("--nvenc-preset", default="p7")
     parser.add_argument("--nvenc-rc", default="vbr")
     parser.add_argument("--cq", type=int, default=18)
@@ -65,7 +70,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--bitrate")
     parser.add_argument("--maxrate")
     parser.add_argument("--bufsize")
-    parser.add_argument("--pix-fmt", default="yuv420p10le")
+    parser.add_argument("--pix-fmt", default="auto", help="Output pixel format. auto follows the input pixel format.")
     parser.add_argument("--audio-codec", default="copy")
     parser.add_argument(
         "--subtitle-mode",
@@ -109,7 +114,7 @@ def config_from_args(args: argparse.Namespace) -> PipelineConfig:
             trt_max_shape=parse_shape(args.trt_max_shape),
         ),
         nvenc=NvencOptions(
-            codec=args.nvenc_codec,
+            codec=None if args.nvenc_codec == "auto" else args.nvenc_codec,
             preset=args.nvenc_preset,
             rate_control=args.nvenc_rc,
             cq=args.cq,

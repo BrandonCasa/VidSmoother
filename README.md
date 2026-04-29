@@ -5,7 +5,7 @@ VidSmoother interpolates video with VapourSynth, RIFE TensorRT, vspipe, and FFmp
 ## Features
 
 - RIFE frame interpolation through `vs-rife` with TensorRT enabled.
-- NVIDIA NVENC output through FFmpeg, defaulting to HEVC 10-bit.
+- FFmpeg output that follows the input codec and pixel format by default, using matching NVIDIA NVENC encoders for H.264, HEVC, or AV1 when available.
 - VapourSynth script generation per input video.
 - Batch processing from an input folder, with optional recursive scanning.
 - Dry-run mode that prints the generated `vspipe` and FFmpeg commands.
@@ -87,6 +87,7 @@ Useful options:
 ```powershell
 .\VidSmoother.exe --input-dir C:\videos\in --output-dir C:\videos\out --recursive --overwrite
 .\VidSmoother.exe --factor-num 2 --factor-den 1 --rife-model 4.26
+.\VidSmoother.exe --nvenc-codec auto --pix-fmt auto
 .\VidSmoother.exe --nvenc-codec hevc_nvenc --cq 18 --pix-fmt yuv420p10le
 .\VidSmoother.exe --device-index 0 --trt-opt-shape 1920x1080 --trt-max-shape 3840x2160
 ```

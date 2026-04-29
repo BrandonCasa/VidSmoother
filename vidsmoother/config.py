@@ -45,7 +45,7 @@ class RifeTensorRtOptions:
 
 @dataclass(frozen=True)
 class NvencOptions:
-    codec: str
+    codec: str | None
     preset: str
     rate_control: str
     cq: int | None
