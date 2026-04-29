@@ -207,14 +207,14 @@ jobs:
           Copy-Item -Force -Path (Join-Path $pythonHome "python*.dll") -Destination $runtimeRoot
           Copy-Item -Force -Path (Join-Path $pythonHome "vcruntime*.dll") -Destination $runtimeRoot -ErrorAction SilentlyContinue
 
-      - name: Build one-file exe
+      - name: Build onedir app
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
           $python = ".\.venv-build\Scripts\python.exe"
           & $python -m PyInstaller `
             --clean `
-            --onefile `
+            --onedir `
             --name VidSmoother `
             --paths ".\extern\vs-rife" `
             --add-data "$env:BUNDLE_ROOT\libs;libs" `
@@ -226,7 +226,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          .\dist\VidSmoother.exe --help
+          .\dist\VidSmoother\VidSmoother.exe --help
 
       - name: Create release files
         shell: pwsh
@@ -234,7 +234,7 @@ jobs:
           $ErrorActionPreference = "Stop"
           $releaseDir = Join-Path $env:RUNNER_TEMP "release"
           New-Item -ItemType Directory -Force -Path $releaseDir | Out-Null
-          Copy-Item -Path ".\dist\VidSmoother.exe" -Destination (Join-Path $releaseDir "VidSmoother.exe")
+          Copy-Item -Recurse -Force -Path ".\dist\VidSmoother" -Destination $releaseDir
 
           $notes = @"
           VidSmoother Windows 11 NVIDIA package
@@ -244,14 +244,14 @@ jobs:
           - FFmpeg: $env:BTBN_FFMPEG_BUILDS_TAG ($env:BTBN_FFMPEG_BUILDS_ASSET)
           - VapourSynth: $env:VAPOURSYNTH_VERSION_LABEL Python package
           - L-SMASH-Works: $env:HOMEOFAVISYNTHPLUSEVOLUTION_L_SMASH_WORKS_TAG ($env:HOMEOFAVISYNTHPLUSEVOLUTION_L_SMASH_WORKS_ASSET)
-          - Python runtime/packages are embedded in VidSmoother.exe by PyInstaller.
+          - Python runtime/packages are bundled beside VidSmoother.exe by PyInstaller onedir mode.
 
           Target machine requirements:
           - Windows 11
           - NVIDIA GPU with a current NVIDIA driver
 
           Usage:
-          - Put input videos beside VidSmoother.exe in an input folder, or pass --input-dir.
+          - Extract the zip, then put input videos beside VidSmoother.exe in an input folder, or pass --input-dir.
           - Run VidSmoother.exe --dry-run to verify commands.
           - Run VidSmoother.exe --overwrite to process videos.
 
@@ -261,18 +261,16 @@ jobs:
 
           $zipName = "$($env:PACKAGE_NAME)-${{ inputs.version }}.zip"
           $zipPath = Join-Path $env:RUNNER_TEMP $zipName
-          Compress-Archive -Path (Join-Path $releaseDir "*") -DestinationPath $zipPath -Force
+          Push-Location $releaseDir
+          7z a -tzip -mx=5 $zipPath *
+          Pop-Location
+          if (-not (Test-Path $zipPath)) {
+            throw "Release zip was not created."
+          }
           "RELEASE_DIR=$releaseDir" | Out-File -FilePath $env:GITHUB_ENV -Append
           "ZIP_PATH=$zipPath" | Out-File -FilePath $env:GITHUB_ENV -Append
 
-      - name: Upload exe artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: VidSmoother.exe-${{ inputs.version }}
-          path: ${{ env.RELEASE_DIR }}\VidSmoother.exe
-          if-no-files-found: error
-
-      - name: Upload zip artifact
+      - name: Upload package artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.PACKAGE_NAME }}-${{ inputs.version }}
@@ -285,8 +283,6 @@ jobs:
         with:
           tag_name: ${{ inputs.version }}
           name: VidSmoother ${{ inputs.version }} Windows 11 NVIDIA
-          files: |
-            ${{ env.RELEASE_DIR }}\VidSmoother.exe
-            ${{ env.ZIP_PATH }}
+          files: ${{ env.ZIP_PATH }}
           make_latest: false
           generate_release_notes: true
