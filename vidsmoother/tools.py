@@ -1,14 +1,54 @@
 from __future__ import annotations
 
+import os
 import shutil
+import sys
 from pathlib import Path
 
 from .config import ToolPaths
 from .errors import ToolMissingError
 
 
-def repo_root() -> Path:
+def bundled_root() -> Path:
+    frozen_root = getattr(sys, "_MEIPASS", None)
+    if frozen_root:
+        return Path(frozen_root)
     return Path(__file__).resolve().parent.parent
+
+
+def repo_root() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent.parent
+
+
+def bundled_runtime_env() -> dict[str, str]:
+    root = bundled_root()
+    env = os.environ.copy()
+    python_runtime = root / "python-runtime"
+    path_entries = [
+        python_runtime,
+        python_runtime / "DLLs",
+        root / "libs" / "ffmpeg",
+        root / "libs" / "vapoursynth",
+        root / "libs" / "vapoursynth" / "core",
+    ]
+    python_entries = [
+        python_runtime / "Lib",
+        root / "python" / "site-packages",
+    ]
+
+    existing_path = env.get("PATH", "")
+    env["PATH"] = os.pathsep.join([str(path) for path in path_entries if path.exists()] + [existing_path])
+
+    existing_pythonpath = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = os.pathsep.join(
+        [str(path) for path in python_entries if path.exists()] + ([existing_pythonpath] if existing_pythonpath else [])
+    )
+    if python_runtime.exists():
+        env.setdefault("PYTHONHOME", str(python_runtime))
+
+    return env
 
 
 def _first_existing(candidates: list[Path]) -> Path | None:
@@ -55,8 +95,9 @@ def default_tool_paths(
     ffprobe: str | None,
     vspipe: str | None,
 ) -> ToolPaths:
-    root = repo_root()
+    root = bundled_root()
     ffmpeg_dir = root / "libs" / "ffmpeg"
+    vapoursynth_dir = root / "libs" / "vapoursynth"
 
     return ToolPaths(
         ffmpeg=resolve_executable(
@@ -71,7 +112,11 @@ def default_tool_paths(
         ),
         vspipe=resolve_executable(
             vspipe,
-            [root / "venv" / "Scripts" / "vspipe.exe", root / "venv" / "bin" / "vspipe"],
+            [
+                vapoursynth_dir / "vspipe.exe",
+                root / "venv" / "Scripts" / "vspipe.exe",
+                root / "venv" / "bin" / "vspipe",
+            ],
             ["vspipe.exe", "vspipe"],
         ),
     )

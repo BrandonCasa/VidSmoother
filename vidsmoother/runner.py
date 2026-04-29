@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Iterable, TextIO
 
 from .errors import CommandError
+from .tools import bundled_runtime_env
 
 
 def format_command(command: Iterable[object]) -> str:
@@ -32,6 +33,7 @@ def run_command(
                 stdout=log,
                 stderr=log,
                 text=True,
+                env=bundled_runtime_env(),
             )
     else:
         result = subprocess.run(
@@ -39,6 +41,7 @@ def run_command(
             stdout=stdout,
             stderr=stderr,
             text=True,
+            env=bundled_runtime_env(),
         )
 
     if result.returncode != 0:
@@ -67,12 +70,14 @@ def run_vspipe_to_ffmpeg(
             [str(part) for part in vspipe_command],
             stdout=subprocess.PIPE,
             stderr=vp_log,
+            env=bundled_runtime_env(),
         )
         ffmpeg = subprocess.Popen(
             [str(part) for part in ffmpeg_command],
             stdin=vspipe.stdout,
             stdout=ff_log,
             stderr=ff_log,
+            env=bundled_runtime_env(),
         )
         if vspipe.stdout is not None:
             vspipe.stdout.close()
