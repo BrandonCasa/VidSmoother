@@ -1,11 +1,12 @@
 # VidSmoother
 
-VidSmoother interpolates video with VapourSynth, RIFE TensorRT, vspipe, and FFmpeg NVENC. It is currently aimed at Windows 11 systems with NVIDIA GPUs.
+VidSmoother interpolates videos and animated GIFs with VapourSynth, RIFE TensorRT, vspipe, and FFmpeg. It is currently aimed at Windows 11 systems with NVIDIA GPUs.
 
 ## Features
 
 - RIFE frame interpolation through `vs-rife` with TensorRT enabled.
 - FFmpeg output that follows the input codec and pixel format by default, using matching NVIDIA NVENC encoders for H.264, HEVC, or AV1 when available.
+- Animated GIF input and output, including the normal scene-change guarded RIFE interpolation path and palette-based GIF encoding.
 - VapourSynth script generation per input video.
 - Batch processing from an input folder, with optional recursive scanning.
 - Dry-run mode that prints the generated `vspipe` and FFmpeg commands.
@@ -80,7 +81,7 @@ copy C:\videos\example.mp4 .\input\
 .\VidSmoother.exe --overwrite
 ```
 
-By default, VidSmoother reads from `input`, writes processed videos to `output`, and stores temporary work files under `output\_work` beside the executable.
+By default, VidSmoother reads from `input`, writes processed videos or GIFs to `output`, and stores temporary work files under `output\_work` beside the executable. Animated GIFs are written back as `.gif` files. During processing, GIF inputs are first converted to a temporary lossless video so the same VapourSynth and RIFE scene-change detection pipeline can be used, then FFmpeg encodes the final GIF with a generated palette.
 
 Useful options:
 

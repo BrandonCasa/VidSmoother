@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import replace
 import subprocess
 from pathlib import Path
 
 from .config import PipelineConfig
 from .media import VideoInfo, iter_videos, probe_video
-from .runner import run_vspipe_to_ffmpeg
+from .runner import run_command, run_vspipe_to_ffmpeg
 from .tools import bundled_runtime_env
 from .vpy import write_vapoursynth_script
 
@@ -56,7 +57,8 @@ def process_video(video: Path, config: PipelineConfig) -> Path:
         f"{info.fps:.3f}fps x {config.rife.factor_num}/{config.rife.factor_den} via TensorRT"
     )
 
-    write_vapoursynth_script(video, info, script, config)
+    source_video, source_info = prepare_source_video(video, info, video_work, logs, config)
+    write_vapoursynth_script(source_video, source_info, script, config)
     run_vspipe_to_ffmpeg(
         build_vspipe_command(script, config),
         build_ffmpeg_command(info, output, config),
@@ -71,7 +73,43 @@ def process_video(video: Path, config: PipelineConfig) -> Path:
 
 def output_path_for(video: Path, config: PipelineConfig) -> Path:
     suffix = "trt_rife"
-    return config.output_dir / f"{video.stem}_{suffix}_{config.rife.factor_num}x.mp4"
+    extension = ".gif" if video.suffix.lower() == ".gif" else ".mp4"
+    return config.output_dir / f"{video.stem}_{suffix}_{config.rife.factor_num}x{extension}"
+
+
+def prepare_source_video(
+    video: Path,
+    info: VideoInfo,
+    video_work: Path,
+    logs: Path,
+    config: PipelineConfig,
+) -> tuple[Path, VideoInfo]:
+    if not info.is_gif:
+        return video, info
+
+    prepared = video_work / f"{video.stem}_source.mkv"
+    run_command(
+        [
+            config.tools.ffmpeg,
+            "-y",
+            "-i",
+            video,
+            "-map",
+            "0:v:0",
+            "-an",
+            "-sn",
+            "-c:v",
+            "ffv1",
+            "-level",
+            "3",
+            "-pix_fmt",
+            "yuv444p",
+            prepared,
+        ],
+        log_file=logs / "gif-prepare.log",
+        dry_run=config.dry_run,
+    )
+    return prepared, replace(info, path=prepared, codec="ffv1", pix_fmt="yuv444p", has_audio=False)
 
 
 def build_vspipe_command(script: Path, config: PipelineConfig) -> list[object]:
@@ -80,6 +118,9 @@ def build_vspipe_command(script: Path, config: PipelineConfig) -> list[object]:
 
 def build_ffmpeg_command(info: VideoInfo, output: Path, config: PipelineConfig) -> list[object]:
     output.parent.mkdir(parents=True, exist_ok=True)
+    if info.is_gif:
+        return build_gif_ffmpeg_command(output, config)
+
     command: list[object] = [
         config.tools.ffmpeg,
         "-y",
@@ -120,6 +161,24 @@ def build_ffmpeg_command(info: VideoInfo, output: Path, config: PipelineConfig) 
 
     command.extend(["-movflags", "+faststart", output])
     return command
+
+
+def build_gif_ffmpeg_command(output: Path, config: PipelineConfig) -> list[object]:
+    return [
+        config.tools.ffmpeg,
+        "-y",
+        "-i",
+        "pipe:0",
+        "-filter_complex",
+        (
+            "[0:v]split=2[gif_frames][gif_palette_src];"
+            "[gif_palette_src]palettegen=stats_mode=full[gif_palette];"
+            "[gif_frames][gif_palette]paletteuse=dither=sierra2_4a"
+        ),
+        "-loop",
+        "0",
+        output,
+    ]
 
 
 def resolve_video_encoder(info: VideoInfo, config: PipelineConfig) -> str:

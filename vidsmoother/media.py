@@ -21,6 +21,10 @@ class VideoInfo:
     pix_fmt: str
     has_audio: bool
 
+    @property
+    def is_gif(self) -> bool:
+        return self.codec == "gif" or self.path.suffix.lower() == ".gif"
+
 
 def iter_videos(input_dir: Path, *, recursive: bool) -> list[Path]:
     pattern = "**/*" if recursive else "*"

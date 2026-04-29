@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-VIDEO_EXTENSIONS = {".mp4", ".mkv", ".mov", ".avi", ".webm", ".m4v"}
+VIDEO_EXTENSIONS = {".mp4", ".mkv", ".mov", ".avi", ".webm", ".m4v", ".gif"}
 
 
 @dataclass(frozen=True)
