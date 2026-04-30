@@ -328,6 +328,63 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
+          function Escape-TomlString {
+            param([Parameter(Mandatory)] [string] $Value)
+            return '"' + $Value.Replace('\', '\\') + '"'
+          }
+
+          function Write-VapourSynthConfig {
+            param(
+              [Parameter(Mandatory)] [string] $VSScriptPath,
+              [Parameter(Mandatory)] [string] $PythonExe,
+              [Parameter(Mandatory)] [string] $PythonSymbolPath
+            )
+
+            $configDir = Join-Path $env:APPDATA "vapoursynth"
+            New-Item -ItemType Directory -Force -Path $configDir | Out-Null
+
+            $configPath = Join-Path $configDir "vapoursynth.toml"
+            $vsscriptKey = (Resolve-Path $VSScriptPath).Path.ToLowerInvariant()
+            $pythonExePath = (Resolve-Path $PythonExe).Path
+            $pythonSymbol = (Resolve-Path $PythonSymbolPath).Path
+
+            $line = "$(Escape-TomlString $vsscriptKey) = [$(Escape-TomlString $pythonExePath),$(Escape-TomlString $pythonSymbol)]"
+            $line | Set-Content -Path $configPath -Encoding UTF8
+            Write-Host "Configuration written to $configPath for $vsscriptKey"
+          }
+
+          function Get-PythonSymbolPath {
+            param([Parameter(Mandatory)] [string] $PythonExe)
+
+            $script = @'
+          import ctypes
+          from ctypes.wintypes import DWORD, HMODULE, LPWSTR
+
+          kernel32 = ctypes.WinDLL("kernel32.dll")
+          get_module_file_name = kernel32.GetModuleFileNameW
+          get_module_file_name.argtypes = [HMODULE, LPWSTR, DWORD]
+          get_module_file_name.restype = DWORD
+
+          buffer = ctypes.create_unicode_buffer(32768)
+          result = get_module_file_name(ctypes.pythonapi._handle, buffer, len(buffer))
+          if result == 0:
+              raise SystemExit("Could not determine Python symbol path")
+          print(buffer.value)
+          '@
+
+            $symbolPath = & $PythonExe -c $script
+            if ($LASTEXITCODE -ne 0) {
+              throw "Could not determine Python symbol path with $PythonExe"
+            }
+
+            $symbolPath = $symbolPath.Trim()
+            if (-not (Test-Path $symbolPath)) {
+              throw "Python symbol path does not exist: $symbolPath"
+            }
+
+            return $symbolPath
+          }
+
           $appRoot = ".\dist\VidSmoother"
           $internalRoot = Join-Path $appRoot "_internal"
 
@@ -340,9 +397,19 @@ jobs:
           $sitePackages = Join-Path $internalRoot "python\site-packages"
 
           $vspipe = Join-Path $vsRoot "vspipe.exe"
+          $vsscript = Join-Path $vsRoot "vsscript.dll"
+          $runtimePython = Join-Path $runtimeRoot "python.exe"
 
           if (-not (Test-Path $vspipe)) {
             throw "vspipe.exe not found: $vspipe"
+          }
+
+          if (-not (Test-Path $vsscript)) {
+            throw "vsscript.dll not found: $vsscript"
+          }
+
+          if (-not (Test-Path $runtimePython)) {
+            throw "Bundled python.exe not found: $runtimePython"
           }
 
           $scriptsRoot = Join-Path $internalRoot "python-scripts"
@@ -358,10 +425,8 @@ jobs:
             throw "vapoursynth.exe not found in bundled python-scripts: $vapoursynthExe"
           }
 
-          & $vapoursynthExe config
-          if ($LASTEXITCODE -ne 0) {
-            throw "vapoursynth config failed with exit code $LASTEXITCODE"
-          }
+          $pythonSymbolPath = Get-PythonSymbolPath -PythonExe $runtimePython
+          Write-VapourSynthConfig -VSScriptPath $vsscript -PythonExe $runtimePython -PythonSymbolPath $pythonSymbolPath
 
           & (Join-Path $vsRoot "vspipe.exe") --version
           if ($LASTEXITCODE -ne 0) {
