@@ -1,2 +1,2 @@
-rureactpy[starlette]
+reactpy[starlette]
 uvicorn
