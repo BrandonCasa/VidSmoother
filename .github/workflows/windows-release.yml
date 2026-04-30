@@ -30,7 +30,7 @@ on:
       publish_release:
         description: Publish a GitHub release with the built exe and zip
         required: true
-        default: false
+        default: true
         type: boolean
 
 permissions:
@@ -48,12 +48,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6.0.2
         with:
           submodules: recursive
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6.2.0
         with:
           python-version: ${{ inputs.python_version }}
 
