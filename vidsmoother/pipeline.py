@@ -132,7 +132,7 @@ def build_ffmpeg_command(info: VideoInfo, output: Path, config: PipelineConfig) 
         "0:v:0",
     ]
 
-    if info.has_audio:
+    if info.has_audio and config.nvenc.audio_codec != "none":
         command.extend(["-map", "1:a:0?"])
 
     video_encoder = resolve_video_encoder(info, config)
@@ -156,7 +156,9 @@ def build_ffmpeg_command(info: VideoInfo, output: Path, config: PipelineConfig) 
     pix_fmt = info.pix_fmt if config.nvenc.pix_fmt == "auto" else config.nvenc.pix_fmt
     command.extend(["-pix_fmt", pix_fmt])
 
-    if info.has_audio:
+    if info.has_audio and config.nvenc.audio_codec == "none":
+        command.append("-an")
+    elif info.has_audio:
         command.extend(["-c:a", config.nvenc.audio_codec])
 
     command.extend(["-movflags", "+faststart", output])
