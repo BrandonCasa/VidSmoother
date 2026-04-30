@@ -1,3 +1,4 @@
 reactpy[starlette]
+starlette<1
 uvicorn
 colorlog
