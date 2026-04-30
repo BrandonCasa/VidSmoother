@@ -165,6 +165,22 @@ Example using local project tools:
 .\.venv\Scripts\python.exe main.py --ffmpeg "E:\VidSmoother\ffmpeg\ffmpeg.exe" --ffprobe "E:\VidSmoother\ffmpeg\ffprobe.exe" --vspipe ".\.venv\Scripts\vspipe.exe"
 ```
 
+## ReactPy Interface
+
+Install the optional UI dependencies:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-ui.txt
+```
+
+Start the local ReactPy interface:
+
+```powershell
+.\.venv\Scripts\python.exe -m vidsmoother.ui --host 127.0.0.1 --port 8000
+```
+
+Open `http://127.0.0.1:8000`. The interface provides settings for the same pipeline options as the CLI, a media list populated from the input folder, per-file selection, and a processing job panel.
+
 ## Common Local Setup Errors
 
 ### `There is no attribute or namespace named misc`

@@ -181,6 +181,7 @@ jobs:
           $scriptsDir = ".\.venv-build\Scripts"
 
           & $python -m pip install --upgrade pip packaging setuptools wheel pyinstaller
+          & $python -m pip install --upgrade -r requirements-ui.txt
 
           & $python -m pip install --upgrade `
             torch torchvision torch_tensorrt `
@@ -193,7 +194,8 @@ jobs:
 
           & $python -m pip install --upgrade `
             --target $env:RUNTIME_SITE_PACKAGES `
-            packaging setuptools wheel $env:VAPOURSYNTH_PACKAGE_SPEC ".\extern\vs-rife"
+            packaging setuptools wheel $env:VAPOURSYNTH_PACKAGE_SPEC ".\extern\vs-rife" `
+            -r requirements-ui.txt
 
           $vapourSynthPackage = Join-Path $env:RUNTIME_SITE_PACKAGES "vapoursynth"
           $vapourSynthBundle = Join-Path $env:BUNDLE_ROOT "libs\vapoursynth"
@@ -310,11 +312,16 @@ jobs:
             --onedir `
             --name VidSmoother `
             --paths ".\extern\vs-rife" `
+            --collect-all reactpy `
+            --collect-all starlette `
+            --collect-all uvicorn `
+            --collect-all anyio `
+            --hidden-import reactpy.backend.starlette `
             --add-data "$env:BUNDLE_ROOT\libs;libs" `
             --add-data "$env:BUNDLE_ROOT\python;python" `
             --add-data "$env:BUNDLE_ROOT\python-runtime;python-runtime" `
             --add-data "$env:BUNDLE_ROOT\python-scripts;python-scripts" `
-            ".\main.py"
+            ".\ui_main.py"
 
       - name: Configure bundled VapourSynth Python binding
         shell: pwsh
@@ -366,6 +373,47 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           .\dist\VidSmoother\VidSmoother.exe --help
+
+          $uiOut = Join-Path $env:RUNNER_TEMP "vidsmoother-ui.out.log"
+          $uiErr = Join-Path $env:RUNNER_TEMP "vidsmoother-ui.err.log"
+          $uiProcess = Start-Process `
+            -FilePath ".\dist\VidSmoother\VidSmoother.exe" `
+            -ArgumentList "--host", "127.0.0.1", "--port", "8765", "--no-browser" `
+            -RedirectStandardOutput $uiOut `
+            -RedirectStandardError $uiErr `
+            -PassThru
+
+          try {
+            $deadline = (Get-Date).AddSeconds(30)
+            $started = $false
+            while ((Get-Date) -lt $deadline) {
+              if ($uiProcess.HasExited) {
+                $stdout = if (Test-Path $uiOut) { Get-Content $uiOut -Raw } else { "" }
+                $stderr = if (Test-Path $uiErr) { Get-Content $uiErr -Raw } else { "" }
+                throw "VidSmoother UI exited during smoke test with code $($uiProcess.ExitCode). Stdout: $stdout Stderr: $stderr"
+              }
+
+              try {
+                $response = Invoke-WebRequest -Uri "http://127.0.0.1:8765" -UseBasicParsing -TimeoutSec 2
+                if ($response.StatusCode -eq 200) {
+                  $started = $true
+                  break
+                }
+              } catch {
+                Start-Sleep -Seconds 1
+              }
+            }
+
+            if (-not $started) {
+              $stdout = if (Test-Path $uiOut) { Get-Content $uiOut -Raw } else { "" }
+              $stderr = if (Test-Path $uiErr) { Get-Content $uiErr -Raw } else { "" }
+              throw "VidSmoother UI did not respond on http://127.0.0.1:8765. Stdout: $stdout Stderr: $stderr"
+            }
+          } finally {
+            if (-not $uiProcess.HasExited) {
+              Stop-Process -Id $uiProcess.Id -Force
+            }
+          }
 
           $pluginDir = Join-Path ".\dist\VidSmoother\_internal\libs\vapoursynth\vs-plugins" ""
           if (-not (Test-Path $pluginDir)) {
@@ -437,8 +485,9 @@ jobs:
           Usage:
           - Download all .7z parts.
           - Extract the .7z.001 file with 7-Zip.
-          - Run VidSmoother.exe --dry-run to verify commands.
-          - Run VidSmoother.exe --overwrite to process videos.
+          - Run VidSmoother.exe to start the local ReactPy interface.
+          - Open http://127.0.0.1:8000 if your browser does not open automatically.
+          - Use the Settings panel to enable dry-run or overwrite behavior before processing videos.
 
           This workflow is manual-only and is not triggered by pushes, pull requests, tags, or releases.
           "@
