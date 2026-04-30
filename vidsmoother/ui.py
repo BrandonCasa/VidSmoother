@@ -12,7 +12,7 @@ from .cli import config_from_args
 from .errors import VidSmootherError
 from .media import iter_videos
 from .pipeline import process_video
-from .tools import repo_root
+from .tools import default_ffmpeg_paths, repo_root
 
 
 APP_TITLE = "VidSmoother"
@@ -31,6 +31,7 @@ _JOB_LOCK = threading.Lock()
 
 def default_settings() -> dict[str, Any]:
     root = repo_root()
+    ffmpeg, ffprobe = default_ffmpeg_paths()
     return {
         "input_dir": str(root / "input"),
         "output_dir": str(root / "output"),
@@ -39,8 +40,8 @@ def default_settings() -> dict[str, Any]:
         "overwrite": False,
         "dry_run": False,
         "workers": "1",
-        "ffmpeg": "",
-        "ffprobe": "",
+        "ffmpeg": str(ffmpeg) if ffmpeg else "",
+        "ffprobe": str(ffprobe) if ffprobe else "",
         "vspipe": "",
         "source_filter": "lsmas",
         "matrix": "709",

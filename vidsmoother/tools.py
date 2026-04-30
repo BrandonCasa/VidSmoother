@@ -149,7 +149,7 @@ def _first_existing(candidates: list[Path]) -> Path | None:
     return None
 
 
-def resolve_executable(value: str | None, bundled: list[Path], names: list[str]) -> Path:
+def locate_executable(value: str | None, bundled: list[Path], names: list[str]) -> Path | None:
     if value:
         path = Path(value).expanduser()
         if path.exists():
@@ -157,7 +157,7 @@ def resolve_executable(value: str | None, bundled: list[Path], names: list[str])
         found = shutil.which(value)
         if found:
             return Path(found).resolve()
-        raise ToolMissingError(f"Executable not found: {value}")
+        return None
 
     bundled_match = _first_existing(bundled)
     if bundled_match:
@@ -168,7 +168,48 @@ def resolve_executable(value: str | None, bundled: list[Path], names: list[str])
         if found:
             return Path(found).resolve()
 
+    return None
+
+
+def resolve_executable(value: str | None, bundled: list[Path], names: list[str]) -> Path:
+    located = locate_executable(value, bundled, names)
+    if located:
+        return located
+    if value:
+        raise ToolMissingError(f"Executable not found: {value}")
     raise ToolMissingError(f"Could not locate executable. Tried: {', '.join(names)}")
+
+
+def ffmpeg_search_dirs(root: Path) -> list[Path]:
+    return [
+        root / "libs" / "ffmpeg",
+        root / "ffmpeg" / "bin",
+        root / "ffmpeg",
+        root / "bin",
+    ]
+
+
+def _ffmpeg_candidates(directories: list[Path], executable: str) -> list[Path]:
+    return [directory / f"{executable}.exe" for directory in directories] + [
+        directory / executable for directory in directories
+    ]
+
+
+def default_ffmpeg_paths(*, ffmpeg: str | None = None, ffprobe: str | None = None) -> tuple[Path | None, Path | None]:
+    root = bundled_root()
+    ffmpeg_dirs = ffmpeg_search_dirs(root)
+    return (
+        locate_executable(
+            ffmpeg,
+            _ffmpeg_candidates(ffmpeg_dirs, "ffmpeg"),
+            ["ffmpeg.exe", "ffmpeg"],
+        ),
+        locate_executable(
+            ffprobe,
+            _ffmpeg_candidates(ffmpeg_dirs, "ffprobe"),
+            ["ffprobe.exe", "ffprobe"],
+        ),
+    )
 
 
 def resolve_optional_path(value: str | None, bundled: list[Path]) -> Path | None:
@@ -187,18 +228,18 @@ def default_tool_paths(
     vspipe: str | None,
 ) -> ToolPaths:
     root = bundled_root()
-    ffmpeg_dir = root / "libs" / "ffmpeg"
+    ffmpeg_dirs = ffmpeg_search_dirs(root)
     vapoursynth_dir = root / "libs" / "vapoursynth"
 
     return ToolPaths(
         ffmpeg=resolve_executable(
             ffmpeg,
-            [ffmpeg_dir / "ffmpeg.exe", ffmpeg_dir / "ffmpeg"],
+            _ffmpeg_candidates(ffmpeg_dirs, "ffmpeg"),
             ["ffmpeg.exe", "ffmpeg"],
         ),
         ffprobe=resolve_executable(
             ffprobe,
-            [ffmpeg_dir / "ffprobe.exe", ffmpeg_dir / "ffprobe"],
+            _ffmpeg_candidates(ffmpeg_dirs, "ffprobe"),
             ["ffprobe.exe", "ffprobe"],
         ),
         vspipe=resolve_executable(
