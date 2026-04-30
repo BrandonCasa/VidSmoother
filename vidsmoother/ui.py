@@ -275,44 +275,44 @@ def make_app_component():
     }
 
     @component
-    def TextField(label: str, key: str, settings: dict[str, Any], set_settings):
+    def TextField(label: str, setting_key: str, settings: dict[str, Any], set_settings):
         def handle_change(event):
             next_settings = dict(settings)
-            next_settings[key] = event["target"]["value"]
+            next_settings[setting_key] = event["target"]["value"]
             set_settings(next_settings)
 
         return html.label(
             {"style": styles["field"]},
             html.span({"style": styles["label"]}, label),
-            html.input({"style": styles["input"], "value": settings[key], "on_change": handle_change}),
+            html.input({"style": styles["input"], "value": settings[setting_key], "on_change": handle_change}),
         )
 
     @component
-    def SelectField(label: str, key: str, options: list[str], settings: dict[str, Any], set_settings):
+    def SelectField(label: str, setting_key: str, options: list[str], settings: dict[str, Any], set_settings):
         def handle_change(event):
             next_settings = dict(settings)
-            next_settings[key] = event["target"]["value"]
+            next_settings[setting_key] = event["target"]["value"]
             set_settings(next_settings)
 
         return html.label(
             {"style": styles["field"]},
             html.span({"style": styles["label"]}, label),
             html.select(
-                {"style": styles["input"], "value": settings[key], "on_change": handle_change},
+                {"style": styles["input"], "value": settings[setting_key], "on_change": handle_change},
                 [html.option({"value": option}, option) for option in options],
             ),
         )
 
     @component
-    def Toggle(label: str, key: str, settings: dict[str, Any], set_settings):
+    def Toggle(label: str, setting_key: str, settings: dict[str, Any], set_settings):
         def handle_change(event):
             next_settings = dict(settings)
-            next_settings[key] = event["target"]["checked"]
+            next_settings[setting_key] = event["target"]["checked"]
             set_settings(next_settings)
 
         return html.label(
             {"style": {"display": "flex", "alignItems": "center", "gap": "8px", "marginBottom": "10px"}},
-            html.input({"type": "checkbox", "checked": bool(settings[key]), "on_change": handle_change}),
+            html.input({"type": "checkbox", "checked": bool(settings[setting_key]), "on_change": handle_change}),
             html.span(label),
         )
 

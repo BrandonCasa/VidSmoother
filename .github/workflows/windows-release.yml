@@ -316,7 +316,10 @@ jobs:
             --collect-all starlette `
             --collect-all uvicorn `
             --collect-all anyio `
+            --collect-all colorlog `
             --hidden-import reactpy.backend.starlette `
+            --hidden-import colorlog `
+            --hidden-import colorlog.escape_codes `
             --add-data "$env:BUNDLE_ROOT\libs;libs" `
             --add-data "$env:BUNDLE_ROOT\python;python" `
             --add-data "$env:BUNDLE_ROOT\python-runtime;python-runtime" `
