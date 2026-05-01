@@ -4,4 +4,4 @@ wheel
 vapoursynth
 vsrife
 nvidia-modelopt[all]
-triton
+triton-windows

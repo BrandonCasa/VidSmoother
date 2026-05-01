@@ -188,7 +188,7 @@ jobs:
             --extra-index-url $env:TORCH_INDEX_URL `
             --extra-index-url $env:NVIDIA_PYPI_URL
 
-          & $python -m pip install --upgrade nvidia-modelopt[all] triton
+          & $python -m pip install --upgrade nvidia-modelopt[all] triton-windows
 
           & $python -m pip install --upgrade $env:VAPOURSYNTH_PACKAGE_SPEC ".\extern\vs-rife"
 
@@ -227,7 +227,7 @@ jobs:
             --extra-index-url $env:TORCH_INDEX_URL `
             --extra-index-url $env:NVIDIA_PYPI_URL
 
-          & $python -m pip install --upgrade nvidia-modelopt[all] triton --target $env:RUNTIME_SITE_PACKAGES
+          & $python -m pip install --upgrade nvidia-modelopt[all] triton-windows --target $env:RUNTIME_SITE_PACKAGES
 
           # Copy Scripts again after Torch install in case additional runtime executables/DLL-adjacent launchers were added.
           Copy-Item -Recurse -Force -Path (Join-Path $scriptsDir "*") -Destination $bundleScriptsDir
