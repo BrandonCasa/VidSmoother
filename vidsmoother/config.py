@@ -58,6 +58,12 @@ class NvencOptions:
 
 
 @dataclass(frozen=True)
+class GifOptions:
+    max_fps: float | None
+    max_width: int | None
+
+
+@dataclass(frozen=True)
 class PipelineConfig:
     input_dir: Path
     output_dir: Path
@@ -66,6 +72,7 @@ class PipelineConfig:
     vapoursynth: VapourSynthOptions
     rife: RifeTensorRtOptions
     nvenc: NvencOptions
+    gif: GifOptions
     subtitle_mode: str
     overwrite: bool
     dry_run: bool

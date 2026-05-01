@@ -4,7 +4,7 @@ import argparse
 import os
 from pathlib import Path
 
-from .config import NvencOptions, PipelineConfig, RifeTensorRtOptions, VapourSynthOptions
+from .config import GifOptions, NvencOptions, PipelineConfig, RifeTensorRtOptions, VapourSynthOptions
 from .errors import VidSmootherError
 from .pipeline import process_all
 from .tools import default_tool_paths, repo_root
@@ -73,6 +73,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--pix-fmt", default="auto", help="Output pixel format. auto follows the input pixel format.")
     parser.add_argument("--audio-codec", default="copy")
     parser.add_argument(
+        "--gif-max-fps",
+        type=float,
+        default=50.0,
+        help="Maximum frame rate for GIF output. Use 0 to keep the full interpolated frame rate.",
+    )
+    parser.add_argument(
+        "--gif-max-width",
+        type=int,
+        default=720,
+        help="Maximum GIF output width. Use 0 to keep the interpolated frame size.",
+    )
+    parser.add_argument(
         "--subtitle-mode",
         choices=["none"],
         default="none",
@@ -124,6 +136,10 @@ def config_from_args(args: argparse.Namespace) -> PipelineConfig:
             bufsize=args.bufsize,
             pix_fmt=args.pix_fmt,
             audio_codec=args.audio_codec,
+        ),
+        gif=GifOptions(
+            max_fps=args.gif_max_fps if args.gif_max_fps and args.gif_max_fps > 0 else None,
+            max_width=args.gif_max_width if args.gif_max_width and args.gif_max_width > 0 else None,
         ),
         subtitle_mode=args.subtitle_mode,
         overwrite=args.overwrite,

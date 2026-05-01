@@ -119,7 +119,7 @@ def build_vspipe_command(script: Path, config: PipelineConfig) -> list[object]:
 def build_ffmpeg_command(info: VideoInfo, output: Path, config: PipelineConfig) -> list[object]:
     output.parent.mkdir(parents=True, exist_ok=True)
     if info.is_gif:
-        return build_gif_ffmpeg_command(output, config)
+        return build_gif_ffmpeg_command(info, output, config)
 
     command: list[object] = [
         config.tools.ffmpeg,
@@ -165,22 +165,40 @@ def build_ffmpeg_command(info: VideoInfo, output: Path, config: PipelineConfig) 
     return command
 
 
-def build_gif_ffmpeg_command(output: Path, config: PipelineConfig) -> list[object]:
+def build_gif_ffmpeg_command(info: VideoInfo, output: Path, config: PipelineConfig) -> list[object]:
+    filters = build_gif_filter_chain(info, config)
     return [
         config.tools.ffmpeg,
         "-y",
         "-i",
         "pipe:0",
         "-filter_complex",
-        (
-            "[0:v]split=2[gif_frames][gif_palette_src];"
-            "[gif_palette_src]palettegen=stats_mode=full[gif_palette];"
-            "[gif_frames][gif_palette]paletteuse=dither=sierra2_4a"
-        ),
+        filters,
+        "-gifflags",
+        "+transdiff+offsetting",
         "-loop",
         "0",
         output,
     ]
+
+
+def build_gif_filter_chain(info: VideoInfo, config: PipelineConfig) -> str:
+    frame_rate = info.fps * config.rife.factor_num / config.rife.factor_den
+    if config.gif.max_fps is not None:
+        frame_rate = min(frame_rate, config.gif.max_fps)
+
+    pre_palette_filters = [f"fps=fps={frame_rate:.6f}:round=near"]
+    if config.gif.max_width is not None:
+        pre_palette_filters.append(
+            f"scale=w='min(iw\\,{config.gif.max_width})':h=-2:flags=lanczos"
+        )
+
+    pre_palette = ",".join(pre_palette_filters)
+    return (
+        f"[0:v]{pre_palette},split=2[gif_frames][gif_palette_src];"
+        "[gif_palette_src]palettegen=stats_mode=full[gif_palette];"
+        "[gif_frames][gif_palette]paletteuse=dither=sierra2_4a"
+    )
 
 
 def resolve_video_encoder(info: VideoInfo, config: PipelineConfig) -> str:
