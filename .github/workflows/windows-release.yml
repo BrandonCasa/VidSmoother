@@ -190,6 +190,11 @@ jobs:
 
           & $python -m pip install --upgrade nvidia-modelopt[all] triton-windows
 
+          & $python -m pip install --upgrade --force-reinstall `
+            torch torchvision torch_tensorrt `
+            --extra-index-url $env:TORCH_INDEX_URL `
+            --extra-index-url $env:NVIDIA_PYPI_URL
+
           & $python -m pip install --upgrade $env:VAPOURSYNTH_PACKAGE_SPEC ".\extern\vs-rife"
 
           & $python -m pip check
@@ -221,13 +226,13 @@ jobs:
             Write-Host "vspipe.exe was not found in python-scripts; bundled VapourSynth copy will be used from libs\vapoursynth."
           }
 
-          & $python -m pip install --upgrade `
+          & $python -m pip install --upgrade nvidia-modelopt[all] triton-windows --target $env:RUNTIME_SITE_PACKAGES
+
+          & $python -m pip install --upgrade --force-reinstall `
             --target $env:RUNTIME_SITE_PACKAGES `
             torch torchvision torch_tensorrt `
             --extra-index-url $env:TORCH_INDEX_URL `
             --extra-index-url $env:NVIDIA_PYPI_URL
-
-          & $python -m pip install --upgrade nvidia-modelopt[all] triton-windows --target $env:RUNTIME_SITE_PACKAGES
 
           # Copy Scripts again after Torch install in case additional runtime executables/DLL-adjacent launchers were added.
           Copy-Item -Recurse -Force -Path (Join-Path $scriptsDir "*") -Destination $bundleScriptsDir
@@ -520,15 +525,39 @@ jobs:
             $scriptsRoot = ".\dist\VidSmoother\python-scripts"
           }
 
-          $env:PATH = "$scriptsRoot;$runtimeRoot;$vsRoot;$sitePackages;$env:PATH"
+          $packageDllDirs = @()
+          $torchLib = Join-Path $sitePackages "torch\lib"
+          if (Test-Path $torchLib) {
+            $packageDllDirs += (Resolve-Path $torchLib).Path
+          }
+
+          $nvidiaRoot = Join-Path $sitePackages "nvidia"
+          if (Test-Path $nvidiaRoot) {
+            Get-ChildItem -Path $nvidiaRoot -Directory | ForEach-Object {
+              foreach ($relativeDir in @("bin", "lib", "lib\x64")) {
+                $candidate = Join-Path $_.FullName $relativeDir
+                if (Test-Path $candidate) {
+                  $packageDllDirs += (Resolve-Path $candidate).Path
+                }
+              }
+            }
+          }
+
+          $packageDllPath = ($packageDllDirs | Select-Object -Unique) -join ";"
+          $env:PATH = "$scriptsRoot;$runtimeRoot;$vsRoot;$sitePackages;$packageDllPath;$env:PATH"
           $env:PYTHONHOME = (Resolve-Path $runtimeRoot).Path
           $env:PYTHONPATH = (Resolve-Path $sitePackages).Path
-          $env:PATH = "$runtimeRoot;$vsRoot;$sitePackages;$env:PATH"
+          $env:PATH = "$runtimeRoot;$vsRoot;$sitePackages;$packageDllPath;$env:PATH"
           $env:VAPOURSYNTH_EXTRA_PLUGIN_PATH = (Resolve-Path (Join-Path $vsRoot "vs-plugins")).Path
 
           & (Join-Path $vsRoot "vspipe.exe") --version
           if ($LASTEXITCODE -ne 0) {
             throw "Bundled vspipe could not initialize VSScript"
+          }
+
+          & (Join-Path $runtimeRoot "python.exe") -c "import torch; print(f'torch {torch.__version__} cuda {torch.version.cuda}'); assert torch.version.cuda is not None, 'Bundled torch is CPU-only; expected a CUDA build.'"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Bundled runtime does not contain a CUDA-enabled Torch build."
           }
 
           & (Join-Path $runtimeRoot "python.exe") -c "import modelopt; print('modelopt ok')"

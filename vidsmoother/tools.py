@@ -107,6 +107,25 @@ def _ensure_vapoursynth_config(root: Path) -> None:
         _vapoursynth_configured = True
 
 
+def _python_package_dll_dirs(root: Path) -> list[Path]:
+    site_packages = root / "python" / "site-packages"
+    candidates = [site_packages / "torch" / "lib"]
+
+    nvidia_root = site_packages / "nvidia"
+    if nvidia_root.exists():
+        for package_dir in sorted(nvidia_root.iterdir()):
+            if package_dir.is_dir():
+                candidates.extend(
+                    [
+                        package_dir / "bin",
+                        package_dir / "lib",
+                        package_dir / "lib" / "x64",
+                    ]
+                )
+
+    return [path for path in candidates if path.exists()]
+
+
 def bundled_runtime_env() -> dict[str, str]:
     root = bundled_root()
     _ensure_vapoursynth_config(root)
@@ -120,6 +139,7 @@ def bundled_runtime_env() -> dict[str, str]:
         root / "libs" / "ffmpeg",
         root / "libs" / "vapoursynth",
         root / "libs" / "vapoursynth" / "core",
+        *_python_package_dll_dirs(root),
     ]
     python_entries = [
         python_runtime / "Lib",
