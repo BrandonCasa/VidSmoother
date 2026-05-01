@@ -61,6 +61,8 @@ class NvencOptions:
 class GifOptions:
     max_fps: float | None
     max_width: int | None
+    timeline_smoothing: bool
+    hard_hold_percentile: float
 
 
 @dataclass(frozen=True)

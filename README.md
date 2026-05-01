@@ -63,8 +63,8 @@ copy C:\videos\example.mp4 .\input\
 
 By default, VidSmoother reads from `input`, writes processed videos or GIFs to `output`, and stores temporary work files under `output\_work` beside the executable.
 
-Animated GIFs are written back as `.gif` files. During processing, GIF inputs are first converted to a temporary lossless video so the same VapourSynth and RIFE scene-change detection pipeline can be used. FFmpeg then encodes the final GIF with a generated palette.
-GIF output is capped to 50 fps and 720 px wide by default to keep interpolated GIFs from growing excessively. Use `--gif-max-fps 0` or `--gif-max-width 0` to disable either cap.
+Animated GIFs are written back as `.gif` files. By default, GIF inputs use a timeline-aware path that extracts source frame delays, preserves unusually long holds, runs RIFE on shorter frame transitions, and reassembles a variable-delay GIF with a generated palette. Use `--no-gif-timeline-smoothing` to fall back to the older constant-rate GIF path.
+GIF timeline output uses a 50 fps timing quantum and 720 px width cap by default to keep interpolated GIFs from growing excessively. Use `--gif-max-fps 0` or `--gif-max-width 0` to disable either cap. Unusually long delays at or above the 85th percentile are treated as hard holds by default; tune this with `--gif-hard-hold-percentile`.
 Optional frame deduplication can remove repeated or nearly repeated frames after interpolation while preserving timestamps. For GIFs, that means skipped frames become longer GIF frame delays instead of shortening playback.
 
 Useful options:
@@ -73,6 +73,7 @@ Useful options:
 .\VidSmoother.exe --input-dir C:\videos\in --output-dir C:\videos\out --recursive --overwrite
 .\VidSmoother.exe --factor-num 2 --factor-den 1 --rife-model 4.26
 .\VidSmoother.exe --gif-max-fps 30 --gif-max-width 640
+.\VidSmoother.exe --gif-hard-hold-percentile 90
 .\VidSmoother.exe --dedup-strength 50 --dedup-algorithm cuda-mpdecimate
 .\VidSmoother.exe --nvenc-codec auto --pix-fmt auto
 .\VidSmoother.exe --nvenc-codec hevc_nvenc --cq 18 --pix-fmt yuv420p10le

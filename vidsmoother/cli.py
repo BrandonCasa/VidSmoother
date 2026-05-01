@@ -148,6 +148,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Maximum GIF output width. Use 0 to keep the interpolated frame size.",
     )
     parser.add_argument(
+        "--no-gif-timeline-smoothing",
+        action="store_true",
+        help="Use the older constant-rate GIF path instead of preserving variable GIF frame delays.",
+    )
+    parser.add_argument(
+        "--gif-hard-hold-percentile",
+        type=float,
+        default=85.0,
+        help="Unusually long GIF source delays at or above this percentile are preserved as hard holds.",
+    )
+    parser.add_argument(
         "--dedup-strength",
         type=float,
         default=0.0,
@@ -223,6 +234,8 @@ def config_from_args(args: argparse.Namespace) -> PipelineConfig:
                 if args.gif_max_width and args.gif_max_width > 0
                 else None
             ),
+            timeline_smoothing=not args.no_gif_timeline_smoothing,
+            hard_hold_percentile=max(0.0, min(100.0, args.gif_hard_hold_percentile)),
         ),
         dedup=DedupOptions(
             strength=max(0.0, min(100.0, args.dedup_strength)),

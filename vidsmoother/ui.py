@@ -83,6 +83,8 @@ def default_settings() -> dict[str, Any]:
         "audio_codec": "copy",
         "gif_max_fps": "50",
         "gif_max_width": "720",
+        "gif_timeline_smoothing": True,
+        "gif_hard_hold_percentile": "85",
         "dedup_preset": "none",
         "dedup_strength": "0",
         "dedup_algorithm": "cuda-mpdecimate",
@@ -154,6 +156,8 @@ def _namespace_from_settings(settings: dict[str, Any]) -> argparse.Namespace:
         audio_codec=settings["audio_codec"],
         gif_max_fps=float(settings["gif_max_fps"] or 0),
         gif_max_width=int(settings["gif_max_width"] or 0),
+        no_gif_timeline_smoothing=not bool(settings["gif_timeline_smoothing"]),
+        gif_hard_hold_percentile=float(settings["gif_hard_hold_percentile"] or 85),
         dedup_strength=float(settings["dedup_strength"] or 0),
         dedup_algorithm=settings["dedup_algorithm"],
         subtitle_mode=settings["subtitle_mode"],
@@ -847,6 +851,24 @@ def make_app_component():
                 "related": "Interacts with palette generation and final GIF file size.",
             },
         },
+        "gif_timeline_smoothing": {
+            "advanced": {
+                "title": "GIF timeline smoothing",
+                "what": "Uses a GIF-specific path that preserves source frame delays instead of flattening the animation to constant frame rate.",
+                "how": "VidSmoother extracts GIF frames and delays, smooths only non-hold transitions, then reassembles a variable-delay GIF.",
+                "implications": "This keeps long pauses compact and better preserves original pacing. Disable it to use the older constant-rate GIF path.",
+                "related": "GIF hard hold percentile, GIF max FPS, and frame deduplication.",
+            },
+        },
+        "gif_hard_hold_percentile": {
+            "advanced": {
+                "title": "GIF hard hold percentile",
+                "what": "Controls which long GIF frame delays are treated as intentional holds.",
+                "how": "Delays at or above this percentile, and above the median delay, are emitted as a single delayed frame instead of being morphed toward the next frame.",
+                "implications": "Lower values preserve more holds. Higher values smooth through more delayed frames.",
+                "related": "Only applies when GIF timeline smoothing is enabled.",
+            },
+        },
         "dedup_preset": {
             "beginner": {
                 "title": "Frame deduplication",
@@ -1296,6 +1318,25 @@ def make_app_component():
                 TextField(
                     "GIF max width",
                     "gif_max_width",
+                    settings,
+                    set_settings,
+                    mode,
+                    open_help,
+                ),
+            ),
+            html.div(
+                {"style": styles["row"]},
+                RangeField(
+                    "GIF hard hold percentile",
+                    "gif_hard_hold_percentile",
+                    settings,
+                    set_settings,
+                    mode,
+                    open_help,
+                ),
+                Toggle(
+                    "GIF timeline smoothing",
+                    "gif_timeline_smoothing",
                     settings,
                     set_settings,
                     mode,
