@@ -234,8 +234,6 @@ def should_hold_segment(
         frame, next_frame, config
     ):
         return True
-    if config.dedup.strength == 0:
-        return True
     return False
 
 
