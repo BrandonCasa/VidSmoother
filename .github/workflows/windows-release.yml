@@ -56,6 +56,18 @@ jobs:
         uses: actions/setup-python@v6.2.0
         with:
           python-version: ${{ inputs.python_version }}
+          cache: pip
+          cache-dependency-path: |
+            requirements-ui.txt
+            requirements-trt.txt
+            extern/vs-rife/pyproject.toml
+
+      - name: Cache selected release downloads
+        if: ${{ inputs.ffmpeg_release != 'latest' && inputs.lsmash_release != 'latest' }}
+        uses: actions/cache@v5.05
+        with:
+          path: .cache/release-downloads
+          key: release-downloads-${{ runner.os }}-ffmpeg-${{ inputs.ffmpeg_release }}-lsmash-${{ inputs.lsmash_release }}
 
       - name: Prepare build layout
         shell: pwsh
@@ -112,13 +124,23 @@ jobs:
               $names = ($release.assets | ForEach-Object { $_.name }) -join ", "
               throw "No asset matching '$AssetPattern' found in $Repository release '$($release.tag_name)'. Assets: $names"
             }
-            Invoke-WebRequest -Headers @{ "User-Agent" = "VidSmoother-Release-Build" } -Uri $asset.browser_download_url -OutFile $Destination
+            if (Test-Path $Destination) {
+              $cachedAsset = Get-Item $Destination
+              if ($cachedAsset.Length -gt 0) {
+                Write-Host "Using cached $($asset.name): $Destination"
+              } else {
+                Write-Host "Cached file was empty; re-downloading $($asset.name)."
+                Invoke-WebRequest -Headers @{ "User-Agent" = "VidSmoother-Release-Build" } -Uri $asset.browser_download_url -OutFile $Destination
+              }
+            } else {
+              Invoke-WebRequest -Headers @{ "User-Agent" = "VidSmoother-Release-Build" } -Uri $asset.browser_download_url -OutFile $Destination
+            }
             $envPrefix = ($Repository -replace "[^A-Za-z0-9]", "_").ToUpperInvariant()
             "$($envPrefix)_TAG=$($release.tag_name)" | Out-File -FilePath $env:GITHUB_ENV -Append
             "$($envPrefix)_ASSET=$($asset.name)" | Out-File -FilePath $env:GITHUB_ENV -Append
           }
 
-          $downloadDir = Join-Path $env:RUNNER_TEMP "downloads"
+          $downloadDir = Join-Path $env:GITHUB_WORKSPACE ".cache\release-downloads"
           New-Item -ItemType Directory -Force -Path $downloadDir | Out-Null
 
           Save-ReleaseAsset `
@@ -147,7 +169,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $downloadDir = Join-Path $env:RUNNER_TEMP "downloads"
+          $downloadDir = Join-Path $env:GITHUB_WORKSPACE ".cache\release-downloads"
           $extractDir = Join-Path $env:RUNNER_TEMP "extracted"
           New-Item -ItemType Directory -Force -Path $extractDir | Out-Null
 
