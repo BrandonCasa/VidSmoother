@@ -1341,14 +1341,14 @@ def make_app_component():
                     mode,
                     open_help,
                 ),
-                Toggle(
-                    "GIF timeline smoothing",
-                    "gif_timeline_smoothing",
-                    settings,
-                    set_settings,
-                    mode,
-                    open_help,
-                ),
+                # Toggle(
+                #    "GIF timeline smoothing",
+                #    "gif_timeline_smoothing",
+                #    settings,
+                #    set_settings,
+                #    mode,
+                #    open_help,
+                # ),
             ),
             html.div(
                 {"style": styles["row"]},
