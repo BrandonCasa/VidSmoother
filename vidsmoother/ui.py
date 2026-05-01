@@ -714,7 +714,7 @@ def _open_browser(host: str, port: int) -> None:
     webbrowser.open(f"http://{host}:{port}")
 
 
-def run_ui(host: str = "127.0.0.1", port: int = 8000, *, open_browser: bool = True) -> None:
+def run_ui(host: str = "127.0.0.1", port: int = 8764, *, open_browser: bool = True) -> None:
     from reactpy import run
 
     if open_browser:
@@ -725,7 +725,7 @@ def run_ui(host: str = "127.0.0.1", port: int = 8000, *, open_browser: bool = Tr
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run the VidSmoother ReactPy interface.")
     parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--port", type=int, default=8764)
     parser.add_argument("--no-browser", action="store_true", help="Start the server without opening a browser.")
     args = parser.parse_args(argv)
     run_ui(host=args.host, port=args.port, open_browser=not args.no_browser)

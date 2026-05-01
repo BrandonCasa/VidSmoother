@@ -176,10 +176,10 @@ Install the optional UI dependencies:
 Start the local ReactPy interface:
 
 ```powershell
-.\.venv\Scripts\python.exe -m vidsmoother.ui --host 127.0.0.1 --port 8000
+.\.venv\Scripts\python.exe -m vidsmoother.ui --host 127.0.0.1 --port 8764
 ```
 
-Open `http://127.0.0.1:8000`. The interface provides settings for the same pipeline options as the CLI, a media list populated from the input folder, per-file selection, and a processing job panel.
+Open `http://127.0.0.1:8764`. The interface provides settings for the same pipeline options as the CLI, a media list populated from the input folder, per-file selection, and a processing job panel.
 
 ## Common Local Setup Errors
 

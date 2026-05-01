@@ -554,7 +554,7 @@ jobs:
           - Download all .7z parts.
           - Extract the .7z.001 file with 7-Zip.
           - Run VidSmoother.exe to start the local ReactPy interface.
-          - Open http://127.0.0.1:8000 if your browser does not open automatically.
+          - Open http://127.0.0.1:8764 if your browser does not open automatically.
           - Use the Settings panel to enable dry-run or overwrite behavior before processing videos.
 
           This workflow is manual-only and is not triggered by pushes, pull requests, tags, or releases.
