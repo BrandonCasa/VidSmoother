@@ -121,20 +121,12 @@ def probe_gif_frame_payload(ffprobe: Path, video: Path) -> dict[str, Any]:
         text=True,
     )
     if result.returncode != 0:
-        raise VidSmootherError(
-            f"ffprobe failed for GIF frame timing: {result.stderr.strip()}"
-        )
+        raise VidSmootherError(f"ffprobe failed for GIF frame timing: {result.stderr.strip()}")
     return json.loads(result.stdout)
 
 
-def parse_gif_frame_delays(
-    payload: dict[str, Any], fallback_ms: float
-) -> tuple[list[float], bool]:
-    frames = [
-        frame
-        for frame in payload.get("frames", [])
-        if frame.get("media_type") == "video"
-    ]
+def parse_gif_frame_delays(payload: dict[str, Any], fallback_ms: float) -> tuple[list[float], bool]:
+    frames = [frame for frame in payload.get("frames", []) if frame.get("media_type") == "video"]
     delays = [_frame_duration_ms(frame) for frame in frames]
     if delays and all(delay is not None and delay > 0 for delay in delays):
         return [float(delay) for delay in delays if delay is not None], False
@@ -154,9 +146,7 @@ def parse_gif_frame_delays(
     return [fallback_ms for _ in frames], True
 
 
-def normalize_delay_count(
-    delays_ms: list[float], frame_count: int, fallback_ms: float
-) -> list[float]:
+def normalize_delay_count(delays_ms: list[float], frame_count: int, fallback_ms: float) -> list[float]:
     if len(delays_ms) >= frame_count:
         return delays_ms[:frame_count]
     return delays_ms + [fallback_ms for _ in range(frame_count - len(delays_ms))]
@@ -201,9 +191,7 @@ def centisecond_durations(delay_ms: float, slot_count: int) -> list[float]:
     slots = max(1, min(slot_count, total_cs))
     base = total_cs // slots
     remainder = total_cs % slots
-    return [
-        float(base + (1 if index < remainder else 0)) / 100.0 for index in range(slots)
-    ]
+    return [float(base + (1 if index < remainder else 0)) / 100.0 for index in range(slots)]
 
 
 def percentile(values: list[float], percent: float) -> float:
@@ -230,9 +218,9 @@ def should_hold_segment(
         return True
     if file_sha256(frame) == file_sha256(next_frame):
         return True
-    if config.dedup.strength > 0 and frames_are_near_duplicate(
-        frame, next_frame, config
-    ):
+    if config.dedup.strength > 0 and frames_are_near_duplicate(frame, next_frame, config):
+        return True
+    if config.dedup.strength == 0:
         return True
     return False
 
@@ -291,9 +279,7 @@ def render_transition_frames(
     )
     transition_config = replace(
         config,
-        rife=replace(
-            config.rife, factor_num=slot_count, factor_den=1, scene_change=False
-        ),
+        rife=replace(config.rife, factor_num=slot_count, factor_den=1, scene_change=False),
     )
     write_vapoursynth_script(pair_video, transition_info, script, transition_config)
     run_vspipe_to_ffmpeg(
@@ -314,15 +300,11 @@ def render_transition_frames(
 
     rendered = sorted(output_dir.glob("transition_*.png"))
     if len(rendered) < slot_count:
-        raise VidSmootherError(
-            f"Expected {slot_count} transition frames, got {len(rendered)}"
-        )
+        raise VidSmootherError(f"Expected {slot_count} transition frames, got {len(rendered)}")
     return rendered[:slot_count]
 
 
-def extract_gif_frames(
-    ffmpeg: Path, video: Path, frames_dir: Path, log_file: Path
-) -> None:
+def extract_gif_frames(ffmpeg: Path, video: Path, frames_dir: Path, log_file: Path) -> None:
     run_command(
         [
             ffmpeg,
@@ -347,9 +329,7 @@ def clear_generated_frames(directory: Path, pattern: str) -> None:
             path.unlink()
 
 
-def encode_timeline_gif(
-    manifest: Path, output: Path, log_file: Path, config: PipelineConfig
-) -> None:
+def encode_timeline_gif(manifest: Path, output: Path, log_file: Path, config: PipelineConfig) -> None:
     run_command(
         [
             config.tools.ffmpeg,
@@ -428,9 +408,7 @@ def file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def transition_cache_key(
-    frame: Path, next_frame: Path, slot_count: int, config: PipelineConfig
-) -> str:
+def transition_cache_key(frame: Path, next_frame: Path, slot_count: int, config: PipelineConfig) -> str:
     digest = hashlib.sha256()
     digest.update(file_sha256(frame).encode("ascii"))
     digest.update(file_sha256(next_frame).encode("ascii"))
@@ -442,9 +420,7 @@ def transition_cache_key(
     return digest.hexdigest()[:24]
 
 
-def frames_are_near_duplicate(
-    frame: Path, next_frame: Path, config: PipelineConfig
-) -> bool:
+def frames_are_near_duplicate(frame: Path, next_frame: Path, config: PipelineConfig) -> bool:
     result = subprocess.run(
         [
             str(config.tools.ffmpeg),
@@ -469,9 +445,7 @@ def frames_are_near_duplicate(
     if result.returncode != 0:
         return False
 
-    match = re.search(
-        r"lavfi\.signalstats\.YAVG=([0-9.]+)", result.stdout + result.stderr
-    )
+    match = re.search(r"lavfi\.signalstats\.YAVG=([0-9.]+)", result.stdout + result.stderr)
     if not match:
         return False
     average_difference = float(match.group(1))
