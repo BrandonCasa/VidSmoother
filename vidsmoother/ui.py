@@ -20,7 +20,6 @@ from .media import iter_videos
 from .pipeline import process_video
 from .tools import default_ffmpeg_paths, repo_root
 
-
 APP_TITLE = "VidSmoother"
 
 
@@ -84,6 +83,9 @@ def default_settings() -> dict[str, Any]:
         "audio_codec": "copy",
         "gif_max_fps": "50",
         "gif_max_width": "720",
+        "dedup_preset": "none",
+        "dedup_strength": "0",
+        "dedup_algorithm": "cuda-mpdecimate",
         "subtitle_mode": "none",
     }
 
@@ -152,6 +154,8 @@ def _namespace_from_settings(settings: dict[str, Any]) -> argparse.Namespace:
         audio_codec=settings["audio_codec"],
         gif_max_fps=float(settings["gif_max_fps"] or 0),
         gif_max_width=int(settings["gif_max_width"] or 0),
+        dedup_strength=float(settings["dedup_strength"] or 0),
+        dedup_algorithm=settings["dedup_algorithm"],
         subtitle_mode=settings["subtitle_mode"],
     )
 
@@ -161,7 +165,12 @@ def _job_snapshot() -> UiJob:
         return UiJob(status=_JOB.status, log=list(_JOB.log), running=_JOB.running)
 
 
-def _set_job(*, status: str | None = None, running: bool | None = None, message: str | None = None) -> None:
+def _set_job(
+    *,
+    status: str | None = None,
+    running: bool | None = None,
+    message: str | None = None,
+) -> None:
     with _JOB_LOCK:
         if status is not None:
             _JOB.status = status
@@ -174,7 +183,9 @@ def _set_job(*, status: str | None = None, running: bool | None = None, message:
 def _run_job(settings: dict[str, Any], selected_media: list[str]) -> None:
     try:
         config = config_from_args(_namespace_from_settings(settings))
-        videos = [Path(path) for path in selected_media] or iter_videos(config.input_dir, recursive=config.recursive)
+        videos = [Path(path) for path in selected_media] or iter_videos(
+            config.input_dir, recursive=config.recursive
+        )
         if not videos:
             _set_job(status="idle", running=False, message="No media files selected.")
             return
@@ -204,7 +215,9 @@ def start_job(settings: dict[str, Any], selected_media: list[str]) -> bool:
         _JOB.running = True
         _JOB.log = ["Starting processing job."]
 
-    thread = threading.Thread(target=_run_job, args=(dict(settings), list(selected_media)), daemon=True)
+    thread = threading.Thread(
+        target=_run_job, args=(dict(settings), list(selected_media)), daemon=True
+    )
     thread.start()
     return True
 
@@ -219,7 +232,9 @@ def _posix_child_pids(parent_pid: int) -> list[int]:
         try:
             pid = int(status_path.parent.name)
             parent = None
-            for line in status_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+            for line in status_path.read_text(
+                encoding="utf-8", errors="ignore"
+            ).splitlines():
                 if line.startswith("PPid:"):
                     parent = int(line.split()[1])
                     break
@@ -281,7 +296,11 @@ def request_app_shutdown() -> bool:
             return False
         _SHUTDOWN_REQUESTED = True
 
-    _set_job(status="shutting down", running=False, message="Shutting down VidSmoother and child processes.")
+    _set_job(
+        status="shutting down",
+        running=False,
+        message="Shutting down VidSmoother and child processes.",
+    )
     threading.Thread(target=_shutdown_process_tree, daemon=True).start()
     return True
 
@@ -312,8 +331,18 @@ def make_app_component():
             "boxShadow": "0 1px 2px rgba(16, 24, 40, 0.05)",
         },
         "field": {"display": "grid", "gap": "6px", "marginBottom": "12px"},
-        "label_row": {"display": "flex", "alignItems": "center", "justifyContent": "space-between", "gap": "8px"},
-        "label": {"fontSize": "12px", "fontWeight": "700", "color": "#52606d", "textTransform": "uppercase"},
+        "label_row": {
+            "display": "flex",
+            "alignItems": "center",
+            "justifyContent": "space-between",
+            "gap": "8px",
+        },
+        "label": {
+            "fontSize": "12px",
+            "fontWeight": "700",
+            "color": "#52606d",
+            "textTransform": "uppercase",
+        },
         "help_button": {
             "width": "22px",
             "height": "22px",
@@ -364,7 +393,12 @@ def make_app_component():
             "cursor": "pointer",
             "boxShadow": "0 1px 2px rgba(16, 24, 40, 0.08)",
         },
-        "group_title": {"fontSize": "14px", "fontWeight": "800", "margin": "18px 0 10px", "color": "#334e68"},
+        "group_title": {
+            "fontSize": "14px",
+            "fontWeight": "800",
+            "margin": "18px 0 10px",
+            "color": "#334e68",
+        },
         "toggle_row": {
             "display": "grid",
             "gridTemplateColumns": "auto 1fr auto",
@@ -451,8 +485,18 @@ def make_app_component():
             "marginBottom": "12px",
         },
         "help_section": {"margin": "12px 0"},
-        "help_heading": {"fontSize": "12px", "fontWeight": "800", "color": "#52606d", "textTransform": "uppercase"},
-        "help_text": {"fontSize": "14px", "lineHeight": "1.48", "margin": "6px 0", "color": "#243b53"},
+        "help_heading": {
+            "fontSize": "12px",
+            "fontWeight": "800",
+            "color": "#52606d",
+            "textTransform": "uppercase",
+        },
+        "help_text": {
+            "fontSize": "14px",
+            "lineHeight": "1.48",
+            "margin": "6px 0",
+            "color": "#243b53",
+        },
     }
 
     HELP_CONTENT = {
@@ -803,6 +847,40 @@ def make_app_component():
                 "related": "Interacts with palette generation and final GIF file size.",
             },
         },
+        "dedup_preset": {
+            "beginner": {
+                "title": "Frame deduplication",
+                "what": "This removes repeated or nearly repeated frames after smoothing.",
+                "how": "Medium and Strong map to numeric duplicate-detection strengths. Removed frames keep their timestamp gaps, so GIFs can store the skipped time as longer frame delays.",
+                "implications": "Medium is conservative. Strong can make held animation much smaller, but may remove subtle motion if the source barely changes.",
+                "related": "Works with smoothness boost, GIF frame rate limit, and the advanced dedup strength.",
+            },
+            "advanced": {
+                "title": "Dedup preset",
+                "what": "Beginner-facing preset for dedup strength.",
+                "how": "None sets strength to 0, Medium to 50, and Strong to 80.",
+                "implications": "Advanced mode can use the raw strength slider for finer control.",
+                "related": "Dedup strength and algorithm.",
+            },
+        },
+        "dedup_strength": {
+            "advanced": {
+                "title": "Dedup strength",
+                "what": "Controls how aggressively near-duplicate frames are removed.",
+                "how": "The value maps to FFmpeg duplicate thresholds. 0 disables deduplication; higher values tolerate more pixel difference before a frame is kept.",
+                "implications": "High values are useful for GIF holds and very static video, but can remove subtle movement or low-contrast animation.",
+                "related": "Dedup algorithm and GIF frame delay behavior.",
+            },
+        },
+        "dedup_algorithm": {
+            "advanced": {
+                "title": "Dedup algorithm",
+                "what": "Chooses the filter chain used for duplicate detection.",
+                "how": "mpdecimate uses FFmpeg's pixel-threshold duplicate detector. cuda-mpdecimate runs CUDA upload/scale/download filtering before the same duplicate scoring stage.",
+                "implications": "The CUDA option requires an FFmpeg build with CUDA filters and NVIDIA support; unsupported builds will fail in ffmpeg.log.",
+                "related": "Dedup strength and FFmpeg path.",
+            },
+        },
         "ffmpeg": {
             "beginner": {
                 "title": "FFmpeg app",
@@ -873,13 +951,18 @@ def make_app_component():
 
     def help_for(setting_key: str, mode: str) -> dict[str, str]:
         topic = HELP_CONTENT.get(setting_key, {})
-        return topic.get(mode) or topic.get("advanced") or topic.get("beginner") or {
-            "title": setting_key.replace("_", " ").title(),
-            "what": "This setting is passed through to the processing configuration.",
-            "how": "It is applied when you start a processing job.",
-            "implications": "Invalid values can cause processing to fail.",
-            "related": "Check nearby settings that affect the same stage of the pipeline.",
-        }
+        return (
+            topic.get(mode)
+            or topic.get("advanced")
+            or topic.get("beginner")
+            or {
+                "title": setting_key.replace("_", " ").title(),
+                "what": "This setting is passed through to the processing configuration.",
+                "how": "It is applied when you start a processing job.",
+                "implications": "Invalid values can cause processing to fail.",
+                "related": "Check nearby settings that affect the same stage of the pipeline.",
+            }
+        )
 
     @component
     def HelpButton(setting_key: str, label: str, mode: str, open_help):
@@ -924,7 +1007,64 @@ def make_app_component():
         return html.div(
             {"style": styles["field"]},
             FieldLabel(label, help_key or setting_key, mode, open_help),
-            html.input({"style": styles["input"], "value": settings[setting_key], "on_change": handle_change}),
+            html.input(
+                {
+                    "style": styles["input"],
+                    "value": settings[setting_key],
+                    "on_change": handle_change,
+                }
+            ),
+        )
+
+    @component
+    def RangeField(
+        label: str,
+        setting_key: str,
+        settings: dict[str, Any],
+        set_settings,
+        mode: str,
+        open_help,
+        *,
+        minimum: int = 0,
+        maximum: int = 100,
+    ):
+        def handle_change(event):
+            next_settings = dict(settings)
+            next_settings[setting_key] = event["target"]["value"]
+            set_settings(next_settings)
+
+        value = str(settings[setting_key])
+        return html.div(
+            {"style": styles["field"]},
+            FieldLabel(label, setting_key, mode, open_help),
+            html.div(
+                {
+                    "style": {
+                        "display": "grid",
+                        "gridTemplateColumns": "1fr 48px",
+                        "gap": "10px",
+                        "alignItems": "center",
+                    }
+                },
+                html.input(
+                    {
+                        "type": "range",
+                        "min": str(minimum),
+                        "max": str(maximum),
+                        "step": "1",
+                        "style": {"width": "100%"},
+                        "value": value,
+                        "on_change": handle_change,
+                    }
+                ),
+                html.input(
+                    {
+                        "style": styles["input"],
+                        "value": value,
+                        "on_change": handle_change,
+                    }
+                ),
+            ),
         )
 
     @component
@@ -955,13 +1095,24 @@ def make_app_component():
             {"style": styles["field"]},
             FieldLabel(label, help_key or setting_key, mode, open_help),
             html.select(
-                {"style": styles["input"], "value": settings[setting_key], "on_change": handle_change},
+                {
+                    "style": styles["input"],
+                    "value": settings[setting_key],
+                    "on_change": handle_change,
+                },
                 option_nodes,
             ),
         )
 
     @component
-    def Toggle(label: str, setting_key: str, settings: dict[str, Any], set_settings, mode: str, open_help):
+    def Toggle(
+        label: str,
+        setting_key: str,
+        settings: dict[str, Any],
+        set_settings,
+        mode: str,
+        open_help,
+    ):
         def handle_change(event):
             next_settings = dict(settings)
             next_settings[setting_key] = event["target"]["checked"]
@@ -969,7 +1120,13 @@ def make_app_component():
 
         return html.div(
             {"style": styles["toggle_row"]},
-            html.input({"type": "checkbox", "checked": bool(settings[setting_key]), "on_change": handle_change}),
+            html.input(
+                {
+                    "type": "checkbox",
+                    "checked": bool(settings[setting_key]),
+                    "on_change": handle_change,
+                }
+            ),
             html.label(label),
             HelpButton(setting_key, label, mode, open_help),
         )
@@ -989,7 +1146,11 @@ def make_app_component():
             {"style": styles["field"]},
             FieldLabel("Smoothness boost", "factor", mode, open_help),
             html.select(
-                {"style": styles["input"], "value": current, "on_change": handle_change},
+                {
+                    "style": styles["input"],
+                    "value": current,
+                    "on_change": handle_change,
+                },
                 [
                     html.option({"value": "2:1"}, "2x smoother"),
                     html.option({"value": "3:1"}, "3x smoother"),
@@ -999,73 +1160,318 @@ def make_app_component():
             ),
         )
 
-    def advanced_settings(settings: dict[str, Any], set_settings, mode: str, open_help) -> list[Any]:
+    @component
+    def DedupPresetSelect(settings: dict[str, Any], set_settings, mode: str, open_help):
+        preset_strengths = {"none": "0", "medium": "50", "strong": "80"}
+
+        def handle_change(event):
+            preset = event["target"]["value"]
+            next_settings = dict(settings)
+            next_settings["dedup_preset"] = preset
+            next_settings["dedup_strength"] = preset_strengths[preset]
+            set_settings(next_settings)
+
+        return html.div(
+            {"style": styles["field"]},
+            FieldLabel("Frame deduplication", "dedup_preset", mode, open_help),
+            html.select(
+                {
+                    "style": styles["input"],
+                    "value": settings["dedup_preset"],
+                    "on_change": handle_change,
+                },
+                [
+                    html.option({"value": "none"}, "None"),
+                    html.option({"value": "medium"}, "Medium"),
+                    html.option({"value": "strong"}, "Strong"),
+                ],
+            ),
+        )
+
+    def advanced_settings(
+        settings: dict[str, Any], set_settings, mode: str, open_help
+    ) -> list[Any]:
         return [
-            TextField("Input directory", "input_dir", settings, set_settings, mode, open_help),
-            TextField("Output directory", "output_dir", settings, set_settings, mode, open_help),
-            TextField("Work directory", "work_dir", settings, set_settings, mode, open_help),
-            html.div(
-                {"style": styles["row"]},
-                TextField("Factor numerator", "factor_num", settings, set_settings, mode, open_help),
-                TextField("Factor denominator", "factor_den", settings, set_settings, mode, open_help),
+            TextField(
+                "Input directory", "input_dir", settings, set_settings, mode, open_help
+            ),
+            TextField(
+                "Output directory",
+                "output_dir",
+                settings,
+                set_settings,
+                mode,
+                open_help,
+            ),
+            TextField(
+                "Work directory", "work_dir", settings, set_settings, mode, open_help
             ),
             html.div(
                 {"style": styles["row"]},
-                TextField("RIFE model", "rife_model", settings, set_settings, mode, open_help),
-                TextField("RIFE scale", "scale", settings, set_settings, mode, open_help),
+                TextField(
+                    "Factor numerator",
+                    "factor_num",
+                    settings,
+                    set_settings,
+                    mode,
+                    open_help,
+                ),
+                TextField(
+                    "Factor denominator",
+                    "factor_den",
+                    settings,
+                    set_settings,
+                    mode,
+                    open_help,
+                ),
             ),
             html.div(
                 {"style": styles["row"]},
-                TextField("CUDA device index", "device_index", settings, set_settings, mode, open_help),
-                TextField("Parallel workers", "workers", settings, set_settings, mode, open_help),
+                TextField(
+                    "RIFE model", "rife_model", settings, set_settings, mode, open_help
+                ),
+                TextField(
+                    "RIFE scale", "scale", settings, set_settings, mode, open_help
+                ),
             ),
-            SelectField("VapourSynth source filter", "source_filter", ["lsmas", "ffms2", "bestsource"], settings, set_settings, mode, open_help),
-            SelectField("NVENC video encoder", "nvenc_codec", ["auto", "hevc_nvenc", "h264_nvenc", "av1_nvenc"], settings, set_settings, mode, open_help),
+            html.div(
+                {"style": styles["row"]},
+                TextField(
+                    "CUDA device index",
+                    "device_index",
+                    settings,
+                    set_settings,
+                    mode,
+                    open_help,
+                ),
+                TextField(
+                    "Parallel workers",
+                    "workers",
+                    settings,
+                    set_settings,
+                    mode,
+                    open_help,
+                ),
+            ),
+            SelectField(
+                "VapourSynth source filter",
+                "source_filter",
+                ["lsmas", "ffms2", "bestsource"],
+                settings,
+                set_settings,
+                mode,
+                open_help,
+            ),
+            SelectField(
+                "NVENC video encoder",
+                "nvenc_codec",
+                ["auto", "hevc_nvenc", "h264_nvenc", "av1_nvenc"],
+                settings,
+                set_settings,
+                mode,
+                open_help,
+            ),
             html.div(
                 {"style": styles["row"]},
                 TextField("NVENC CQ", "cq", settings, set_settings, mode, open_help),
-                TextField("Output pixel format", "pix_fmt", settings, set_settings, mode, open_help),
+                TextField(
+                    "Output pixel format",
+                    "pix_fmt",
+                    settings,
+                    set_settings,
+                    mode,
+                    open_help,
+                ),
             ),
             html.div(
                 {"style": styles["row"]},
-                TextField("GIF max FPS", "gif_max_fps", settings, set_settings, mode, open_help),
-                TextField("GIF max width", "gif_max_width", settings, set_settings, mode, open_help),
+                TextField(
+                    "GIF max FPS",
+                    "gif_max_fps",
+                    settings,
+                    set_settings,
+                    mode,
+                    open_help,
+                ),
+                TextField(
+                    "GIF max width",
+                    "gif_max_width",
+                    settings,
+                    set_settings,
+                    mode,
+                    open_help,
+                ),
             ),
             html.div(
                 {"style": styles["row"]},
-                TextField("TRT opt shape", "trt_opt_shape", settings, set_settings, mode, open_help),
-                TextField("TRT max shape", "trt_max_shape", settings, set_settings, mode, open_help),
+                RangeField(
+                    "Dedup strength",
+                    "dedup_strength",
+                    settings,
+                    set_settings,
+                    mode,
+                    open_help,
+                ),
+                SelectField(
+                    "Dedup algorithm",
+                    "dedup_algorithm",
+                    [
+                        ("mpdecimate", "FFmpeg mpdecimate"),
+                        ("cuda-mpdecimate", "CUDA-assisted mpdecimate"),
+                    ],
+                    settings,
+                    set_settings,
+                    mode,
+                    open_help,
+                ),
             ),
-            Toggle("Recursive scan", "recursive", settings, set_settings, mode, open_help),
-            Toggle("Overwrite outputs", "overwrite", settings, set_settings, mode, open_help),
+            html.div(
+                {"style": styles["row"]},
+                TextField(
+                    "TRT opt shape",
+                    "trt_opt_shape",
+                    settings,
+                    set_settings,
+                    mode,
+                    open_help,
+                ),
+                TextField(
+                    "TRT max shape",
+                    "trt_max_shape",
+                    settings,
+                    set_settings,
+                    mode,
+                    open_help,
+                ),
+            ),
+            Toggle(
+                "Recursive scan", "recursive", settings, set_settings, mode, open_help
+            ),
+            Toggle(
+                "Overwrite outputs",
+                "overwrite",
+                settings,
+                set_settings,
+                mode,
+                open_help,
+            ),
             Toggle("Dry run", "dry_run", settings, set_settings, mode, open_help),
-            Toggle("RIFE ensemble mode", "ensemble", settings, set_settings, mode, open_help),
-            Toggle("Disable scene change detection", "no_scene_change", settings, set_settings, mode, open_help),
+            Toggle(
+                "RIFE ensemble mode",
+                "ensemble",
+                settings,
+                set_settings,
+                mode,
+                open_help,
+            ),
+            Toggle(
+                "Disable scene change detection",
+                "no_scene_change",
+                settings,
+                set_settings,
+                mode,
+                open_help,
+            ),
         ]
 
-    def beginner_settings(settings: dict[str, Any], set_settings, mode: str, open_help) -> list[Any]:
+    def beginner_settings(
+        settings: dict[str, Any], set_settings, mode: str, open_help
+    ) -> list[Any]:
         return [
             html.div({"style": styles["group_title"]}, "Folders"),
-            TextField("Videos to scan", "input_dir", settings, set_settings, mode, open_help),
-            TextField("Save finished videos in", "output_dir", settings, set_settings, mode, open_help),
-            TextField("Store temporary files in", "work_dir", settings, set_settings, mode, open_help),
-            Toggle("Include videos inside subfolders", "recursive", settings, set_settings, mode, open_help),
-            Toggle("Replace finished videos with the same name", "overwrite", settings, set_settings, mode, open_help),
+            TextField(
+                "Videos to scan", "input_dir", settings, set_settings, mode, open_help
+            ),
+            TextField(
+                "Save finished videos in",
+                "output_dir",
+                settings,
+                set_settings,
+                mode,
+                open_help,
+            ),
+            TextField(
+                "Store temporary files in",
+                "work_dir",
+                settings,
+                set_settings,
+                mode,
+                open_help,
+            ),
+            Toggle(
+                "Include videos inside subfolders",
+                "recursive",
+                settings,
+                set_settings,
+                mode,
+                open_help,
+            ),
+            Toggle(
+                "Replace finished videos with the same name",
+                "overwrite",
+                settings,
+                set_settings,
+                mode,
+                open_help,
+            ),
             html.div({"style": styles["group_title"]}, "Smoothness and speed"),
             SmoothnessSelect(settings, set_settings, mode, open_help),
             html.div(
                 {"style": styles["row"]},
-                TextField("Motion model version", "rife_model", settings, set_settings, mode, open_help),
-                TextField("NVIDIA GPU number", "device_index", settings, set_settings, mode, open_help),
+                TextField(
+                    "Motion model version",
+                    "rife_model",
+                    settings,
+                    set_settings,
+                    mode,
+                    open_help,
+                ),
+                TextField(
+                    "NVIDIA GPU number",
+                    "device_index",
+                    settings,
+                    set_settings,
+                    mode,
+                    open_help,
+                ),
             ),
             html.div(
                 {"style": styles["row"]},
-                TextField("Motion detail scale", "scale", settings, set_settings, mode, open_help),
-                TextField("Videos to run at once", "workers", settings, set_settings, mode, open_help),
+                TextField(
+                    "Motion detail scale",
+                    "scale",
+                    settings,
+                    set_settings,
+                    mode,
+                    open_help,
+                ),
+                TextField(
+                    "Videos to run at once",
+                    "workers",
+                    settings,
+                    set_settings,
+                    mode,
+                    open_help,
+                ),
             ),
-            Toggle("Use extra smoothing passes", "ensemble", settings, set_settings, mode, open_help),
-            Toggle("Ignore hard scene cuts", "no_scene_change", settings, set_settings, mode, open_help),
+            Toggle(
+                "Use extra smoothing passes",
+                "ensemble",
+                settings,
+                set_settings,
+                mode,
+                open_help,
+            ),
+            Toggle(
+                "Ignore hard scene cuts",
+                "no_scene_change",
+                settings,
+                set_settings,
+                mode,
+                open_help,
+            ),
             html.div({"style": styles["group_title"]}, "Output video"),
+            DedupPresetSelect(settings, set_settings, mode, open_help),
             SelectField(
                 "Finished video format",
                 "nvenc_codec",
@@ -1082,16 +1488,17 @@ def make_app_component():
             ),
             html.div(
                 {"style": styles["row"]},
-                TextField("Picture quality number", "cq", settings, set_settings, mode, open_help),
-                TextField("Color storage format", "pix_fmt", settings, set_settings, mode, open_help),
-            ),
-            html.div(
-                {"style": styles["row"]},
-                TextField("Target bitrate", "bitrate", settings, set_settings, mode, open_help),
-                SelectField(
-                    "Audio handling",
-                    "audio_codec",
-                    [("copy", "Keep original audio"), ("aac", "AAC"), ("libopus", "Opus"), ("none", "No audio")],
+                TextField(
+                    "Picture quality number",
+                    "cq",
+                    settings,
+                    set_settings,
+                    mode,
+                    open_help,
+                ),
+                TextField(
+                    "Color storage format",
+                    "pix_fmt",
                     settings,
                     set_settings,
                     mode,
@@ -1100,14 +1507,61 @@ def make_app_component():
             ),
             html.div(
                 {"style": styles["row"]},
-                TextField("GIF frame rate limit", "gif_max_fps", settings, set_settings, mode, open_help),
-                TextField("GIF width limit", "gif_max_width", settings, set_settings, mode, open_help),
+                TextField(
+                    "Target bitrate", "bitrate", settings, set_settings, mode, open_help
+                ),
+                SelectField(
+                    "Audio handling",
+                    "audio_codec",
+                    [
+                        ("copy", "Keep original audio"),
+                        ("aac", "AAC"),
+                        ("libopus", "Opus"),
+                        ("none", "No audio"),
+                    ],
+                    settings,
+                    set_settings,
+                    mode,
+                    open_help,
+                ),
+            ),
+            html.div(
+                {"style": styles["row"]},
+                TextField(
+                    "GIF frame rate limit",
+                    "gif_max_fps",
+                    settings,
+                    set_settings,
+                    mode,
+                    open_help,
+                ),
+                TextField(
+                    "GIF width limit",
+                    "gif_max_width",
+                    settings,
+                    set_settings,
+                    mode,
+                    open_help,
+                ),
             ),
             html.div({"style": styles["group_title"]}, "Tools"),
-            TextField("FFmpeg program", "ffmpeg", settings, set_settings, mode, open_help),
-            TextField("FFprobe program", "ffprobe", settings, set_settings, mode, open_help),
-            TextField("VapourSynth runner", "vspipe", settings, set_settings, mode, open_help),
-            Toggle("Preview commands without processing", "dry_run", settings, set_settings, mode, open_help),
+            TextField(
+                "FFmpeg program", "ffmpeg", settings, set_settings, mode, open_help
+            ),
+            TextField(
+                "FFprobe program", "ffprobe", settings, set_settings, mode, open_help
+            ),
+            TextField(
+                "VapourSynth runner", "vspipe", settings, set_settings, mode, open_help
+            ),
+            Toggle(
+                "Preview commands without processing",
+                "dry_run",
+                settings,
+                set_settings,
+                mode,
+                open_help,
+            ),
         ]
 
     @component
@@ -1127,10 +1581,23 @@ def make_app_component():
                 html.div(
                     {"style": styles["modal_header"]},
                     html.div(
-                        html.h2({"style": {"margin": "0 0 4px", "fontSize": "20px"}}, topic["title"]),
-                        html.div({"style": styles["muted"]}, f"{mode.title()} mode explanation for {help_state['label']}."),
+                        html.h2(
+                            {"style": {"margin": "0 0 4px", "fontSize": "20px"}},
+                            topic["title"],
+                        ),
+                        html.div(
+                            {"style": styles["muted"]},
+                            f"{mode.title()} mode explanation for {help_state['label']}.",
+                        ),
                     ),
-                    html.button({"style": styles["secondary"], "type": "button", "on_click": handle_close}, "Close"),
+                    html.button(
+                        {
+                            "style": styles["secondary"],
+                            "type": "button",
+                            "on_click": handle_close,
+                        },
+                        "Close",
+                    ),
                 ),
                 html.div(
                     {"style": styles["help_section"]},
@@ -1139,17 +1606,23 @@ def make_app_component():
                 ),
                 html.div(
                     {"style": styles["help_section"]},
-                    html.div({"style": styles["help_heading"]}, "How VidSmoother uses it"),
+                    html.div(
+                        {"style": styles["help_heading"]}, "How VidSmoother uses it"
+                    ),
                     html.p({"style": styles["help_text"]}, topic["how"]),
                 ),
                 html.div(
                     {"style": styles["help_section"]},
-                    html.div({"style": styles["help_heading"]}, "Why your choice matters"),
+                    html.div(
+                        {"style": styles["help_heading"]}, "Why your choice matters"
+                    ),
                     html.p({"style": styles["help_text"]}, topic["implications"]),
                 ),
                 html.div(
                     {"style": styles["help_section"]},
-                    html.div({"style": styles["help_heading"]}, "Settings that affect it"),
+                    html.div(
+                        {"style": styles["help_heading"]}, "Settings that affect it"
+                    ),
                     html.p({"style": styles["help_text"]}, topic["related"]),
                 ),
             ),
@@ -1192,7 +1665,11 @@ def make_app_component():
             set_shutting_down(True)
             requested = request_app_shutdown()
             set_job(_job_snapshot())
-            set_notice("Shutting down VidSmoother and child processes." if requested else "Shutdown is already in progress.")
+            set_notice(
+                "Shutting down VidSmoother and child processes."
+                if requested
+                else "Shutdown is already in progress."
+            )
 
         def toggle_media(path: str):
             def handle_change(event):
@@ -1218,12 +1695,21 @@ def make_app_component():
         media_rows = [
             html.div(
                 {"style": styles["media"]},
-                html.input({"type": "checkbox", "checked": path in selected, "on_change": toggle_media(path)}),
+                html.input(
+                    {
+                        "type": "checkbox",
+                        "checked": path in selected,
+                        "on_change": toggle_media(path),
+                    }
+                ),
                 html.div(
                     html.div(Path(path).name),
                     html.div({"style": styles["muted"]}, str(Path(path).parent)),
                 ),
-                html.div({"style": styles["muted"]}, Path(path).suffix.lower().lstrip(".").upper()),
+                html.div(
+                    {"style": styles["muted"]},
+                    Path(path).suffix.lower().lstrip(".").upper(),
+                ),
             )
             for path in media
         ]
@@ -1243,11 +1729,20 @@ def make_app_component():
                     }
                 },
                 html.div(
-                    html.h1({"style": {"margin": "0 0 4px", "fontSize": "28px"}}, APP_TITLE),
-                    html.div({"style": styles["muted"]}, "ReactPy control surface for interpolation settings and batch media selection."),
+                    html.h1(
+                        {"style": {"margin": "0 0 4px", "fontSize": "28px"}}, APP_TITLE
+                    ),
+                    html.div(
+                        {"style": styles["muted"]},
+                        "ReactPy control surface for interpolation settings and batch media selection.",
+                    ),
                 ),
                 html.button(
-                    {"style": styles["danger"], "on_click": shut_down, "disabled": shutting_down},
+                    {
+                        "style": styles["danger"],
+                        "on_click": shut_down,
+                        "disabled": shutting_down,
+                    },
                     "Shutting down..." if shutting_down else "Shut down",
                 ),
             ),
@@ -1255,42 +1750,101 @@ def make_app_component():
                 {"style": styles["shell"]},
                 html.section(
                     {"style": styles["panel"]},
-                    html.h2({"style": {"marginTop": 0, "fontSize": "18px"}}, "Settings"),
+                    html.h2(
+                        {"style": {"marginTop": 0, "fontSize": "18px"}}, "Settings"
+                    ),
                     html.div(
                         {"style": styles["segmented"]},
                         html.button(
-                            {"style": styles["segment_active"] if mode == "beginner" else styles["segment"], "on_click": choose_mode("beginner")},
+                            {
+                                "style": (
+                                    styles["segment_active"]
+                                    if mode == "beginner"
+                                    else styles["segment"]
+                                ),
+                                "on_click": choose_mode("beginner"),
+                            },
                             "Beginner",
                         ),
                         html.button(
-                            {"style": styles["segment_active"] if mode == "advanced" else styles["segment"], "on_click": choose_mode("advanced")},
+                            {
+                                "style": (
+                                    styles["segment_active"]
+                                    if mode == "advanced"
+                                    else styles["segment"]
+                                ),
+                                "on_click": choose_mode("advanced"),
+                            },
                             "Advanced",
                         ),
                     ),
-                    beginner_settings(settings, set_settings, mode, open_help)
-                    if mode == "beginner"
-                    else advanced_settings(settings, set_settings, mode, open_help),
+                    (
+                        beginner_settings(settings, set_settings, mode, open_help)
+                        if mode == "beginner"
+                        else advanced_settings(settings, set_settings, mode, open_help)
+                    ),
                 ),
                 html.section(
                     {"style": styles["panel"]},
                     html.div(
-                        {"style": {"display": "flex", "justifyContent": "space-between", "gap": "10px", "alignItems": "center"}},
+                        {
+                            "style": {
+                                "display": "flex",
+                                "justifyContent": "space-between",
+                                "gap": "10px",
+                                "alignItems": "center",
+                            }
+                        },
                         html.h2({"style": {"margin": 0, "fontSize": "18px"}}, "Media"),
                         html.div(
                             {"style": {"display": "flex", "gap": "8px"}},
-                            html.button({"style": styles["secondary"], "on_click": refresh_media}, "Scan"),
-                            html.button({"style": styles["button"], "on_click": run_selected, "disabled": job.running}, "Process"),
+                            html.button(
+                                {
+                                    "style": styles["secondary"],
+                                    "on_click": refresh_media,
+                                },
+                                "Scan",
+                            ),
+                            html.button(
+                                {
+                                    "style": styles["button"],
+                                    "on_click": run_selected,
+                                    "disabled": job.running,
+                                },
+                                "Process",
+                            ),
                         ),
                     ),
-                    html.p({"style": styles["muted"]}, notice or "Scan the input folder to populate this list."),
-                    html.div(media_rows or [html.p({"style": styles["muted"]}, "No media loaded.")]),
-                    html.h2({"style": {"fontSize": "18px", "margin": "22px 0 8px"}}, "Job"),
-                    html.div(
-                        {"style": {"display": "flex", "justifyContent": "space-between", "alignItems": "center", "marginBottom": "8px"}},
-                        html.span({"style": styles["muted"]}, f"Status: {job.status}"),
-                        html.button({"style": styles["secondary"], "on_click": refresh_job}, "Refresh"),
+                    html.p(
+                        {"style": styles["muted"]},
+                        notice or "Scan the input folder to populate this list.",
                     ),
-                    html.pre({"style": styles["log"]}, "\n".join(job.log) if job.log else "No job output yet."),
+                    html.div(
+                        media_rows
+                        or [html.p({"style": styles["muted"]}, "No media loaded.")]
+                    ),
+                    html.h2(
+                        {"style": {"fontSize": "18px", "margin": "22px 0 8px"}}, "Job"
+                    ),
+                    html.div(
+                        {
+                            "style": {
+                                "display": "flex",
+                                "justifyContent": "space-between",
+                                "alignItems": "center",
+                                "marginBottom": "8px",
+                            }
+                        },
+                        html.span({"style": styles["muted"]}, f"Status: {job.status}"),
+                        html.button(
+                            {"style": styles["secondary"], "on_click": refresh_job},
+                            "Refresh",
+                        ),
+                    ),
+                    html.pre(
+                        {"style": styles["log"]},
+                        "\n".join(job.log) if job.log else "No job output yet.",
+                    ),
                 ),
             ),
         )
@@ -1302,7 +1856,9 @@ def _open_browser(host: str, port: int) -> None:
     webbrowser.open(f"http://{host}:{port}")
 
 
-def run_ui(host: str = "127.0.0.1", port: int = 8764, *, open_browser: bool = True) -> None:
+def run_ui(
+    host: str = "127.0.0.1", port: int = 8764, *, open_browser: bool = True
+) -> None:
     from reactpy import run
 
     if open_browser:
@@ -1311,10 +1867,16 @@ def run_ui(host: str = "127.0.0.1", port: int = 8764, *, open_browser: bool = Tr
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Run the VidSmoother ReactPy interface.")
+    parser = argparse.ArgumentParser(
+        description="Run the VidSmoother ReactPy interface."
+    )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8764)
-    parser.add_argument("--no-browser", action="store_true", help="Start the server without opening a browser.")
+    parser.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="Start the server without opening a browser.",
+    )
     args = parser.parse_args(argv)
     run_ui(host=args.host, port=args.port, open_browser=not args.no_browser)
     return 0

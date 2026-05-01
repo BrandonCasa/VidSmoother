@@ -4,7 +4,14 @@ import argparse
 import os
 from pathlib import Path
 
-from .config import GifOptions, NvencOptions, PipelineConfig, RifeTensorRtOptions, VapourSynthOptions
+from .config import (
+    DedupOptions,
+    GifOptions,
+    NvencOptions,
+    PipelineConfig,
+    RifeTensorRtOptions,
+    VapourSynthOptions,
+)
 from .errors import VidSmootherError
 from .pipeline import process_all
 from .tools import default_tool_paths, repo_root
@@ -19,10 +26,25 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--input-dir", type=Path, default=root / "input")
     parser.add_argument("--output-dir", type=Path, default=root / "output")
     parser.add_argument("--work-dir", type=Path, default=root / "output" / "_work")
-    parser.add_argument("--recursive", action="store_true", help="Process videos in nested input folders.")
-    parser.add_argument("--overwrite", action="store_true", help="Replace existing output files.")
-    parser.add_argument("--dry-run", action="store_true", help="Generate scripts and print commands without running.")
-    parser.add_argument("--workers", type=int, default=1, help="Number of videos to process in parallel.")
+    parser.add_argument(
+        "--recursive",
+        action="store_true",
+        help="Process videos in nested input folders.",
+    )
+    parser.add_argument(
+        "--overwrite", action="store_true", help="Replace existing output files."
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Generate scripts and print commands without running.",
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+        help="Number of videos to process in parallel.",
+    )
 
     parser.add_argument("--ffmpeg", help="Path or command name for ffmpeg.")
     parser.add_argument("--ffprobe", help="Path or command name for ffprobe.")
@@ -34,22 +56,59 @@ def build_parser() -> argparse.ArgumentParser:
         default="lsmas",
         help="VapourSynth source plugin used in generated .vpy scripts.",
     )
-    parser.add_argument("--matrix", default="709", help="VapourSynth resize matrix, usually 709 for HD video.")
-    parser.add_argument("--fp32", action="store_true", help="Use RGBS/FP32 instead of RGBH/FP16 for RIFE input.")
-    parser.add_argument("--vs-cache-mb", type=int, help="VapourSynth core.max_cache_size in MB.")
+    parser.add_argument(
+        "--matrix",
+        default="709",
+        help="VapourSynth resize matrix, usually 709 for HD video.",
+    )
+    parser.add_argument(
+        "--fp32",
+        action="store_true",
+        help="Use RGBS/FP32 instead of RGBH/FP16 for RIFE input.",
+    )
+    parser.add_argument(
+        "--vs-cache-mb", type=int, help="VapourSynth core.max_cache_size in MB."
+    )
 
     parser.add_argument("--rife-model", default="4.26", help="vs-rife model version.")
-    parser.add_argument("--device-index", type=int, default=0, help="CUDA device index for vs-rife.")
-    parser.add_argument("--factor-num", type=int, default=2, help="Frame-rate multiplier numerator.")
-    parser.add_argument("--factor-den", type=int, default=1, help="Frame-rate multiplier denominator.")
-    parser.add_argument("--scale", type=float, default=1.0, help="RIFE process scale: 0.25, 0.5, 1.0, 2.0, or 4.0.")
-    parser.add_argument("--ensemble", action="store_true", help="Enable RIFE ensemble mode.")
-    parser.add_argument("--no-scene-change", action="store_true", help="Disable scene-change guarded interpolation.")
+    parser.add_argument(
+        "--device-index", type=int, default=0, help="CUDA device index for vs-rife."
+    )
+    parser.add_argument(
+        "--factor-num", type=int, default=2, help="Frame-rate multiplier numerator."
+    )
+    parser.add_argument(
+        "--factor-den", type=int, default=1, help="Frame-rate multiplier denominator."
+    )
+    parser.add_argument(
+        "--scale",
+        type=float,
+        default=1.0,
+        help="RIFE process scale: 0.25, 0.5, 1.0, 2.0, or 4.0.",
+    )
+    parser.add_argument(
+        "--ensemble", action="store_true", help="Enable RIFE ensemble mode."
+    )
+    parser.add_argument(
+        "--no-scene-change",
+        action="store_true",
+        help="Disable scene-change guarded interpolation.",
+    )
     parser.add_argument("--scene-threshold", type=float, default=0.15)
-    parser.add_argument("--no-auto-download", action="store_true", help="Disable vs-rife model auto-download.")
+    parser.add_argument(
+        "--no-auto-download",
+        action="store_true",
+        help="Disable vs-rife model auto-download.",
+    )
 
-    parser.add_argument("--trt-dynamic-shape", action="store_true", help="Build dynamic-shape TensorRT engines.")
-    parser.add_argument("--trt-cache-dir", type=Path, default=root / "output" / "_trt_cache")
+    parser.add_argument(
+        "--trt-dynamic-shape",
+        action="store_true",
+        help="Build dynamic-shape TensorRT engines.",
+    )
+    parser.add_argument(
+        "--trt-cache-dir", type=Path, default=root / "output" / "_trt_cache"
+    )
     parser.add_argument("--trt-workspace-size", type=int, default=0)
     parser.add_argument("--trt-optimization-level", type=int)
     parser.add_argument("--trt-max-aux-streams", type=int)
@@ -70,7 +129,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--bitrate")
     parser.add_argument("--maxrate")
     parser.add_argument("--bufsize")
-    parser.add_argument("--pix-fmt", default="auto", help="Output pixel format. auto follows the input pixel format.")
+    parser.add_argument(
+        "--pix-fmt",
+        default="auto",
+        help="Output pixel format. auto follows the input pixel format.",
+    )
     parser.add_argument("--audio-codec", default="copy")
     parser.add_argument(
         "--gif-max-fps",
@@ -85,6 +148,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="Maximum GIF output width. Use 0 to keep the interpolated frame size.",
     )
     parser.add_argument(
+        "--dedup-strength",
+        type=float,
+        default=0.0,
+        help="Timestamp-preserving duplicate frame removal strength from 0 to 100. 0 disables deduplication.",
+    )
+    parser.add_argument(
+        "--dedup-algorithm",
+        choices=["mpdecimate", "cuda-mpdecimate"],
+        default="cuda-mpdecimate",
+        help="Duplicate detection algorithm. cuda-mpdecimate uses CUDA filtering before FFmpeg duplicate scoring.",
+    )
+    parser.add_argument(
         "--subtitle-mode",
         choices=["none"],
         default="none",
@@ -94,7 +169,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def config_from_args(args: argparse.Namespace) -> PipelineConfig:
-    tools = default_tool_paths(ffmpeg=args.ffmpeg, ffprobe=args.ffprobe, vspipe=args.vspipe)
+    tools = default_tool_paths(
+        ffmpeg=args.ffmpeg, ffprobe=args.ffprobe, vspipe=args.vspipe
+    )
     return PipelineConfig(
         input_dir=args.input_dir.resolve(),
         output_dir=args.output_dir.resolve(),
@@ -138,8 +215,18 @@ def config_from_args(args: argparse.Namespace) -> PipelineConfig:
             audio_codec=args.audio_codec,
         ),
         gif=GifOptions(
-            max_fps=args.gif_max_fps if args.gif_max_fps and args.gif_max_fps > 0 else None,
-            max_width=args.gif_max_width if args.gif_max_width and args.gif_max_width > 0 else None,
+            max_fps=(
+                args.gif_max_fps if args.gif_max_fps and args.gif_max_fps > 0 else None
+            ),
+            max_width=(
+                args.gif_max_width
+                if args.gif_max_width and args.gif_max_width > 0
+                else None
+            ),
+        ),
+        dedup=DedupOptions(
+            strength=max(0.0, min(100.0, args.dedup_strength)),
+            algorithm=args.dedup_algorithm,
         ),
         subtitle_mode=args.subtitle_mode,
         overwrite=args.overwrite,
@@ -154,7 +241,9 @@ def parse_shape(value: str) -> tuple[int, int]:
         width, height = value.lower().split("x", maxsplit=1)
         return int(width), int(height)
     except ValueError as exc:
-        raise VidSmootherError(f"shape must look like WIDTHxHEIGHT, got {value!r}") from exc
+        raise VidSmootherError(
+            f"shape must look like WIDTHxHEIGHT, got {value!r}"
+        ) from exc
 
 
 def main(argv: list[str] | None = None) -> int:

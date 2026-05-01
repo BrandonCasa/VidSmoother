@@ -65,6 +65,7 @@ By default, VidSmoother reads from `input`, writes processed videos or GIFs to `
 
 Animated GIFs are written back as `.gif` files. During processing, GIF inputs are first converted to a temporary lossless video so the same VapourSynth and RIFE scene-change detection pipeline can be used. FFmpeg then encodes the final GIF with a generated palette.
 GIF output is capped to 50 fps and 720 px wide by default to keep interpolated GIFs from growing excessively. Use `--gif-max-fps 0` or `--gif-max-width 0` to disable either cap.
+Optional frame deduplication can remove repeated or nearly repeated frames after interpolation while preserving timestamps. For GIFs, that means skipped frames become longer GIF frame delays instead of shortening playback.
 
 Useful options:
 
@@ -72,6 +73,7 @@ Useful options:
 .\VidSmoother.exe --input-dir C:\videos\in --output-dir C:\videos\out --recursive --overwrite
 .\VidSmoother.exe --factor-num 2 --factor-den 1 --rife-model 4.26
 .\VidSmoother.exe --gif-max-fps 30 --gif-max-width 640
+.\VidSmoother.exe --dedup-strength 50 --dedup-algorithm cuda-mpdecimate
 .\VidSmoother.exe --nvenc-codec auto --pix-fmt auto
 .\VidSmoother.exe --nvenc-codec hevc_nvenc --cq 18 --pix-fmt yuv420p10le
 .\VidSmoother.exe --device-index 0 --trt-opt-shape 1920x1080 --trt-max-shape 3840x2160

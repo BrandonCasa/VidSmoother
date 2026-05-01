@@ -132,6 +132,10 @@ def build_ffmpeg_command(info: VideoInfo, output: Path, config: PipelineConfig) 
         "0:v:0",
     ]
 
+    dedup_filter = build_dedup_filter(config)
+    if dedup_filter:
+        command.extend(["-vf", dedup_filter, "-fps_mode:v", "vfr"])
+
     if info.has_audio and config.nvenc.audio_codec != "none":
         command.extend(["-map", "1:a:0?"])
 
@@ -167,7 +171,7 @@ def build_ffmpeg_command(info: VideoInfo, output: Path, config: PipelineConfig) 
 
 def build_gif_ffmpeg_command(info: VideoInfo, output: Path, config: PipelineConfig) -> list[object]:
     filters = build_gif_filter_chain(info, config)
-    return [
+    command: list[object] = [
         config.tools.ffmpeg,
         "-y",
         "-i",
@@ -178,8 +182,11 @@ def build_gif_ffmpeg_command(info: VideoInfo, output: Path, config: PipelineConf
         "+transdiff+offsetting",
         "-loop",
         "0",
-        output,
     ]
+    if build_dedup_filter(config):
+        command.extend(["-fps_mode:v", "vfr"])
+    command.append(output)
+    return command
 
 
 def build_gif_filter_chain(info: VideoInfo, config: PipelineConfig) -> str:
@@ -193,12 +200,44 @@ def build_gif_filter_chain(info: VideoInfo, config: PipelineConfig) -> str:
             f"scale=w='min(iw\\,{config.gif.max_width})':h=-2:flags=lanczos"
         )
 
+    dedup_filter = build_dedup_filter(config)
+    if dedup_filter:
+        pre_palette_filters.append(dedup_filter)
+
     pre_palette = ",".join(pre_palette_filters)
     return (
         f"[0:v]{pre_palette},split=2[gif_frames][gif_palette_src];"
         "[gif_palette_src]palettegen=stats_mode=full[gif_palette];"
         "[gif_frames][gif_palette]paletteuse=dither=sierra2_4a"
     )
+
+
+def build_dedup_filter(config: PipelineConfig) -> str | None:
+    if config.dedup.strength <= 0:
+        return None
+
+    mpdecimate = build_mpdecimate_filter(config.dedup.strength)
+    if config.dedup.algorithm == "cuda-mpdecimate":
+        return ",".join(
+            [
+                "format=yuv420p",
+                "hwupload_cuda",
+                "scale_cuda=w=iw:h=ih:format=yuv420p",
+                "hwdownload",
+                "format=yuv420p",
+                mpdecimate,
+            ]
+        )
+
+    return mpdecimate
+
+
+def build_mpdecimate_filter(strength: float) -> str:
+    normalized = max(0.0, min(100.0, strength)) / 100.0
+    hi = round(64 * (6 + 22 * normalized))
+    lo = round(64 * (3 + 12 * normalized))
+    frac = 0.08 + 0.42 * normalized
+    return f"mpdecimate=max=0:hi={hi}:lo={lo}:frac={frac:.3f}"
 
 
 def resolve_video_encoder(info: VideoInfo, config: PipelineConfig) -> str:

@@ -64,6 +64,12 @@ class GifOptions:
 
 
 @dataclass(frozen=True)
+class DedupOptions:
+    strength: float
+    algorithm: str
+
+
+@dataclass(frozen=True)
 class PipelineConfig:
     input_dir: Path
     output_dir: Path
@@ -73,6 +79,7 @@ class PipelineConfig:
     rife: RifeTensorRtOptions
     nvenc: NvencOptions
     gif: GifOptions
+    dedup: DedupOptions
     subtitle_mode: str
     overwrite: bool
     dry_run: bool
