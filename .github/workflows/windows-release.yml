@@ -15,17 +15,22 @@ on:
       ffmpeg_release:
         description: BtbN/FFmpeg-Builds release tag, or latest
         required: true
-        default: latest
+        default: autobuild-2026-05-01-13-18
         type: string
       vapoursynth_release:
         description: VapourSynth PyPI version, release tag like R74, or latest
         required: true
-        default: latest
+        default: "75"
+        type: string
+      python_package_cache_version:
+        description: Bump this to refresh cached Python build/runtime packages
+        required: true
+        default: v1
         type: string
       lsmash_release:
         description: HomeOfAviSynthPlusEvolution/L-SMASH-Works release tag, or latest
         required: true
-        default: latest
+        default: "1282"
         type: string
       publish_release:
         description: Publish a GitHub release with the built exe and zip
@@ -60,6 +65,7 @@ jobs:
           cache-dependency-path: |
             requirements-ui.txt
             requirements-trt.txt
+            requirements-release-lock.txt
             extern/vs-rife/pyproject.toml
 
       - name: Cache selected release downloads
@@ -82,6 +88,16 @@ jobs:
           New-Item -ItemType Directory -Force -Path (Join-Path $bundleRoot "python-scripts") | Out-Null
           "BUNDLE_ROOT=$bundleRoot" | Out-File -FilePath $env:GITHUB_ENV -Append
           "RUNTIME_SITE_PACKAGES=$runtimePython" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Cache Python build and runtime packages
+        id: python-package-cache
+        uses: actions/cache@v5.0.5
+        with:
+          path: |
+            .venv-build
+            ${{ runner.temp }}\bundle\python\site-packages
+            ${{ runner.temp }}\bundle\python-scripts
+          key: python-build-runtime-${{ inputs.python_package_cache_version }}-${{ runner.os }}-py-${{ inputs.python_version }}-torch-cu130-vs-${{ inputs.vapoursynth_release }}-${{ hashFiles('requirements-ui.txt', 'requirements-trt.txt', 'requirements-release-lock.txt', 'extern/vs-rife/pyproject.toml', '.github/workflows/windows-release.yml') }}
 
       - name: Resolve selected release assets
         shell: pwsh
@@ -146,7 +162,7 @@ jobs:
           Save-ReleaseAsset `
             -Repository "BtbN/FFmpeg-Builds" `
             -Tag "${{ inputs.ffmpeg_release }}" `
-            -AssetPattern "^ffmpeg-master-.*-win64-gpl\.zip$" `
+            -AssetPattern "^ffmpeg-.*-win64-gpl(?:-[0-9.]+)?\.zip$" `
             -Destination (Join-Path $downloadDir "ffmpeg.zip")
 
           $vapourSynthInput = "${{ inputs.vapoursynth_release }}"
@@ -195,39 +211,82 @@ jobs:
 
       - name: Install Python build and runtime packages
         shell: pwsh
+        env:
+          PYTHON_PACKAGE_CACHE_HIT: ${{ steps.python-package-cache.outputs.cache-hit }}
         run: |
           $ErrorActionPreference = "Stop"
 
-          python -m venv .venv-build
           $python = ".\.venv-build\Scripts\python.exe"
           $scriptsDir = ".\.venv-build\Scripts"
+          $vapourSynthPackage = Join-Path $env:RUNTIME_SITE_PACKAGES "vapoursynth"
+          $vapourSynthBundle = Join-Path $env:BUNDLE_ROOT "libs\vapoursynth"
+          $bundleScriptsDir = Join-Path $env:BUNDLE_ROOT "python-scripts"
+          $constraintsFile = Join-Path $env:GITHUB_WORKSPACE "requirements-release-lock.txt"
 
-          & $python -m pip install --upgrade pip packaging setuptools wheel pyinstaller
-          & $python -m pip install --upgrade -r requirements-ui.txt
+          if ("${{ inputs.vapoursynth_release }}" -eq "latest") {
+            $constraintsFile = Join-Path $env:RUNNER_TEMP "requirements-release-lock-vapoursynth-latest.txt"
+            Get-Content (Join-Path $env:GITHUB_WORKSPACE "requirements-release-lock.txt") |
+              Where-Object { $_ -notmatch "^VapourSynth==" } |
+              Set-Content -Path $constraintsFile -Encoding ASCII
+          }
+
+          $pipConstraints = @("-c", $constraintsFile)
+
+          if ($env:PYTHON_PACKAGE_CACHE_HIT -eq "true") {
+            Write-Host "Using cached Python build and runtime packages."
+
+            if (-not (Test-Path $python)) {
+              throw "Python package cache was restored, but .venv-build is missing python.exe."
+            }
+
+            & $python -m pip check
+
+            if (-not (Test-Path (Join-Path $vapourSynthPackage "vspipe.exe"))) {
+              throw "Cached runtime site-packages did not contain VapourSynth vspipe.exe."
+            }
+
+            Copy-Item -Recurse -Force -Path (Join-Path $vapourSynthPackage "*") -Destination $vapourSynthBundle
+
+            if (-not (Test-Path (Join-Path $bundleScriptsDir "vapoursynth.exe"))) {
+              throw "Cached python-scripts did not contain vapoursynth.exe."
+            }
+
+            if (-not (Test-Path (Join-Path $bundleScriptsDir "vspipe.exe"))) {
+              Write-Host "vspipe.exe was not found in python-scripts; bundled VapourSynth copy will be used from libs\vapoursynth."
+            }
+
+            return
+          }
+
+          python -m venv .venv-build
+
+          & $python -m pip install --upgrade @pipConstraints pip packaging setuptools wheel hatchling pyinstaller
+          & $python -m pip install --upgrade @pipConstraints -r requirements-ui.txt
 
           & $python -m pip install --upgrade `
+            @pipConstraints `
             torch torchvision torch_tensorrt `
             --extra-index-url $env:TORCH_INDEX_URL `
             --extra-index-url $env:NVIDIA_PYPI_URL
 
-          & $python -m pip install --upgrade nvidia-modelopt[all] triton-windows
+          & $python -m pip install --upgrade @pipConstraints nvidia-modelopt[all] triton-windows
 
           & $python -m pip install --upgrade --force-reinstall `
+            @pipConstraints `
             torch torchvision torch_tensorrt `
             --extra-index-url $env:TORCH_INDEX_URL `
             --extra-index-url $env:NVIDIA_PYPI_URL
 
-          & $python -m pip install --upgrade $env:VAPOURSYNTH_PACKAGE_SPEC ".\extern\vs-rife"
+          & $python -m pip install --upgrade @pipConstraints --no-build-isolation $env:VAPOURSYNTH_PACKAGE_SPEC ".\extern\vs-rife"
 
           & $python -m pip check
 
           & $python -m pip install --upgrade `
+            @pipConstraints `
+            --no-build-isolation `
             --target $env:RUNTIME_SITE_PACKAGES `
             packaging setuptools wheel $env:VAPOURSYNTH_PACKAGE_SPEC ".\extern\vs-rife" `
             -r requirements-ui.txt
-
-          $vapourSynthPackage = Join-Path $env:RUNTIME_SITE_PACKAGES "vapoursynth"
-          $vapourSynthBundle = Join-Path $env:BUNDLE_ROOT "libs\vapoursynth"
 
           if (-not (Test-Path (Join-Path $vapourSynthPackage "vspipe.exe"))) {
             throw "Installed VapourSynth package did not contain vspipe.exe."
@@ -236,7 +295,6 @@ jobs:
           Copy-Item -Recurse -Force -Path (Join-Path $vapourSynthPackage "*") -Destination $vapourSynthBundle
 
           # Preserve venv Scripts because VapourSynth installs vapoursynth.exe there.
-          $bundleScriptsDir = Join-Path $env:BUNDLE_ROOT "python-scripts"
           New-Item -ItemType Directory -Force -Path $bundleScriptsDir | Out-Null
           Copy-Item -Recurse -Force -Path (Join-Path $scriptsDir "*") -Destination $bundleScriptsDir
 
@@ -248,9 +306,10 @@ jobs:
             Write-Host "vspipe.exe was not found in python-scripts; bundled VapourSynth copy will be used from libs\vapoursynth."
           }
 
-          & $python -m pip install --upgrade nvidia-modelopt[all] triton-windows --target $env:RUNTIME_SITE_PACKAGES
+          & $python -m pip install --upgrade @pipConstraints nvidia-modelopt[all] triton-windows --target $env:RUNTIME_SITE_PACKAGES
 
           & $python -m pip install --upgrade --force-reinstall `
+            @pipConstraints `
             --target $env:RUNTIME_SITE_PACKAGES `
             torch torchvision torch_tensorrt `
             --extra-index-url $env:TORCH_INDEX_URL `
@@ -279,8 +338,18 @@ jobs:
           $python = ".\.venv-build\Scripts\python.exe"
           $scriptsDir = Split-Path $python
           $vsrepo = Join-Path $scriptsDir "vsrepo.exe"
+          $constraintsFile = Join-Path $env:GITHUB_WORKSPACE "requirements-release-lock.txt"
 
-          Invoke-Native $python -m pip install --upgrade vsrepo
+          if ("${{ inputs.vapoursynth_release }}" -eq "latest") {
+            $constraintsFile = Join-Path $env:RUNNER_TEMP "requirements-release-lock-vapoursynth-latest.txt"
+            Get-Content (Join-Path $env:GITHUB_WORKSPACE "requirements-release-lock.txt") |
+              Where-Object { $_ -notmatch "^VapourSynth==" } |
+              Set-Content -Path $constraintsFile -Encoding ASCII
+          }
+
+          $pipConstraints = @("-c", $constraintsFile)
+
+          Invoke-Native $python -m pip install --upgrade @pipConstraints vsrepo
 
           if (-not (Test-Path $vsrepo)) {
             throw "vsrepo.exe was not found after installing vsrepo: $vsrepo"
