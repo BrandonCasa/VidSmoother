@@ -1495,14 +1495,15 @@ def make_app_component():
                     open_help,
                 ),
             ),
-            Toggle(
-                "Use extra smoothing passes",
-                "ensemble",
-                settings,
-                set_settings,
-                mode,
-                open_help,
-            ),
+            # UNSUPPORTED ON RIFE 4.6
+            # Toggle(
+            #    "Use extra smoothing passes",
+            #    "ensemble",
+            #    settings,
+            #    set_settings,
+            #    mode,
+            #    open_help,
+            # ),
             Toggle(
                 "Ignore hard scene cuts",
                 "no_scene_change",
@@ -1680,10 +1681,24 @@ def make_app_component():
         notice, set_notice = hooks.use_state("")
         job, set_job = hooks.use_state(_job_snapshot())
 
-        async def auto_refresh_job():
-            while True:
-                await asyncio.sleep(1.0)
-                set_job(_job_snapshot())
+        def auto_refresh_job():
+            stop = asyncio.Event()
+
+            async def refresh_loop():
+                while not stop.is_set():
+                    try:
+                        await asyncio.wait_for(stop.wait(), timeout=1.0)
+                    except asyncio.TimeoutError:
+                        if not stop.is_set():
+                            set_job(_job_snapshot())
+
+            task = asyncio.create_task(refresh_loop())
+
+            def cleanup():
+                stop.set()
+                task.cancel()
+
+            return cleanup
 
         hooks.use_effect(auto_refresh_job, [])
 
