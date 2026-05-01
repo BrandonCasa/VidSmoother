@@ -64,7 +64,7 @@ jobs:
 
       - name: Cache selected release downloads
         if: ${{ inputs.ffmpeg_release != 'latest' && inputs.lsmash_release != 'latest' }}
-        uses: actions/cache@v5.05
+        uses: actions/cache@v5.0.5
         with:
           path: .cache/release-downloads
           key: release-downloads-${{ runner.os }}-ffmpeg-${{ inputs.ffmpeg_release }}-lsmash-${{ inputs.lsmash_release }}
