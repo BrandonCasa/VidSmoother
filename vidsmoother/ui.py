@@ -83,7 +83,7 @@ def default_settings() -> dict[str, Any]:
         "audio_codec": "copy",
         "gif_max_fps": "50",
         "gif_max_width": "720",
-        "gif_timeline_smoothing": True,
+        "gif_timeline_smoothing": False,
         "gif_hard_hold_percentile": "85",
         "dedup_preset": "none",
         "dedup_strength": "0",
@@ -852,8 +852,15 @@ def make_app_component():
             },
         },
         "gif_timeline_smoothing": {
-            "advanced": {
+            "beginner": {
                 "title": "GIF timeline smoothing",
+                "what": "Preserves original GIF pacing with an attempt to smooth it out.",
+                "how": "Magic!",
+                "implications": "Disable it to force a constant-rate GIF.",
+                "related": "GIF max FPS, frame deduplication.",
+            },
+            "advanced": {
+                "title": "GIF timeline smoothing     CURRENTLY BROKEN",
                 "what": "Uses a GIF-specific path that preserves source frame delays instead of flattening the animation to constant frame rate.",
                 "how": "VidSmoother extracts GIF frames and delays, smooths only non-hold transitions, then reassembles a variable-delay GIF.",
                 "implications": "This keeps long pauses compact and better preserves original pacing. Disable it to use the older constant-rate GIF path.",
