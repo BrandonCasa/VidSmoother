@@ -1,5 +1,19 @@
 # VidSmoother
 
+<p align="center">
+  <img src="docs/assets/vidsmoother-banner.png" alt="VidSmoother banner: Butter Your Frames, smooth videos with frame interpolation" width="100%">
+</p>
+
+<p align="center">
+  <a href="https://github.com/BrandonCasa/VidSmoother/actions/workflows/windows-release.yml">
+    <img alt="Windows NVIDIA Release" src="https://github.com/BrandonCasa/VidSmoother/actions/workflows/windows-release.yml/badge.svg?event=workflow_dispatch">
+  </a>
+  <a href="https://github.com/BrandonCasa/VidSmoother/releases/latest">
+    <img alt="Latest release" src="https://img.shields.io/github/v/release/BrandonCasa/VidSmoother?include_prereleases&sort=semver">
+  </a>
+  <img alt="Target platform" src="https://img.shields.io/badge/platform-Windows%2011%20%7C%20NVIDIA-0078D4">
+</p>
+
 VidSmoother interpolates videos and animated GIFs with VapourSynth, RIFE TensorRT, vspipe, and FFmpeg. It is currently aimed at Windows 11 systems with NVIDIA GPUs.
 
 ## Features
