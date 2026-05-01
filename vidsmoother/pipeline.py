@@ -6,6 +6,8 @@ import subprocess
 from pathlib import Path
 
 from .config import PipelineConfig
+from .filters import build_dedup_filter
+from .gif_timeline import process_gif_timeline
 from .media import VideoInfo, iter_videos, probe_video
 from .runner import run_command, run_vspipe_to_ffmpeg
 from .tools import bundled_runtime_env
@@ -57,6 +59,11 @@ def process_video(video: Path, config: PipelineConfig) -> Path:
         f"{info.fps:.3f}fps x {config.rife.factor_num}/{config.rife.factor_den} via TensorRT"
     )
 
+    if info.is_gif and config.gif.timeline_smoothing:
+        output = process_gif_timeline(video, info, output, video_work, logs, config)
+        print(f"  Output: {output}")
+        return output
+
     source_video, source_info = prepare_source_video(video, info, video_work, logs, config)
     write_vapoursynth_script(source_video, source_info, script, config)
     run_vspipe_to_ffmpeg(
@@ -92,6 +99,8 @@ def prepare_source_video(
         [
             config.tools.ffmpeg,
             "-y",
+            "-ignore_loop",
+            "1",
             "-i",
             video,
             "-map",
@@ -210,34 +219,6 @@ def build_gif_filter_chain(info: VideoInfo, config: PipelineConfig) -> str:
         "[gif_palette_src]palettegen=stats_mode=full[gif_palette];"
         "[gif_frames][gif_palette]paletteuse=dither=sierra2_4a"
     )
-
-
-def build_dedup_filter(config: PipelineConfig) -> str | None:
-    if config.dedup.strength <= 0:
-        return None
-
-    mpdecimate = build_mpdecimate_filter(config.dedup.strength)
-    if config.dedup.algorithm == "cuda-mpdecimate":
-        return ",".join(
-            [
-                "format=yuv420p",
-                "hwupload_cuda",
-                "scale_cuda=w=iw:h=ih:format=yuv420p",
-                "hwdownload",
-                "format=yuv420p",
-                mpdecimate,
-            ]
-        )
-
-    return mpdecimate
-
-
-def build_mpdecimate_filter(strength: float) -> str:
-    normalized = max(0.0, min(100.0, strength)) / 100.0
-    hi = round(64 * (6 + 22 * normalized))
-    lo = round(64 * (3 + 12 * normalized))
-    frac = 0.08 + 0.42 * normalized
-    return f"mpdecimate=max=0:hi={hi}:lo={lo}:frac={frac:.3f}"
 
 
 def resolve_video_encoder(info: VideoInfo, config: PipelineConfig) -> str:

@@ -3,3 +3,5 @@ setuptools
 wheel
 vapoursynth
 vsrife
+nvidia-modelopt[all]
+triton
