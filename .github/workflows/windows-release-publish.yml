@@ -1,0 +1,39 @@
+name: Publish Windows NVIDIA Release
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Release version or label, for example v0.1.0
+        required: true
+        type: string
+      package_name:
+        description: Uploaded release artifact name prefix
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish-github-release:
+    name: Publish GitHub release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download package artifact
+        uses: actions/download-artifact@v8.0.1
+        with:
+          name: ${{ inputs.package_name }}-${{ inputs.version }}
+          path: release-assets
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v3.0.0
+        with:
+          tag_name: ${{ inputs.version }}
+          name: VidSmoother ${{ inputs.version }} Windows 11 NVIDIA
+          files: release-assets/*
+          make_latest: false
+          prerelease: true
+          generate_release_notes: true
