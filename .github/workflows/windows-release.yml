@@ -215,6 +215,7 @@ jobs:
           PYTHON_PACKAGE_CACHE_HIT: ${{ steps.python-package-cache.outputs.cache-hit }}
         run: |
           $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
 
           $python = ".\.venv-build\Scripts\python.exe"
           $scriptsDir = ".\.venv-build\Scripts"
@@ -286,7 +287,9 @@ jobs:
             --no-build-isolation `
             --target $env:RUNTIME_SITE_PACKAGES `
             packaging setuptools wheel $env:VAPOURSYNTH_PACKAGE_SPEC ".\extern\vs-rife" `
-            -r requirements-ui.txt
+            -r requirements-ui.txt `
+            --extra-index-url $env:TORCH_INDEX_URL `
+            --extra-index-url $env:NVIDIA_PYPI_URL
 
           if (-not (Test-Path (Join-Path $vapourSynthPackage "vspipe.exe"))) {
             throw "Installed VapourSynth package did not contain vspipe.exe."
