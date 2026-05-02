@@ -49,7 +49,7 @@ env:
 jobs:
   build-windows-release:
     name: Build Windows 11 NVIDIA exe
-    runs-on: windows-2025
+    runs-on: self-hosted
 
     steps:
       - name: Checkout
