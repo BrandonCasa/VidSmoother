@@ -50,6 +50,9 @@ jobs:
   build-windows-release:
     name: Build Windows 11 NVIDIA exe
     runs-on: self-hosted
+    defaults:
+      run:
+        shell: pwsh
 
     steps:
       - name: Checkout
