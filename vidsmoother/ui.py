@@ -684,18 +684,18 @@ def make_app_component():
         },
         "workers": {
             "beginner": {
-                "title": "Videos at once",
-                "what": "This controls how many videos VidSmoother tries to process in parallel.",
-                "how": "1 processes one video at a time. Higher values start multiple jobs at once.",
-                "implications": "More is not always faster. Interpolation and NVENC already use the GPU heavily, so multiple videos can cause slowdowns or out-of-memory errors.",
-                "related": "Affected by GPU number, Scale, Extra smoothing passes, and output codec.",
+                "title": "Worker slots",
+                "what": "This controls how many pieces of work VidSmoother can run in parallel.",
+                "how": "1 runs one thing at a time. Higher values can process multiple videos, or multiple dedup transition renders for one video.",
+                "implications": "More is not always faster. Interpolation and NVENC already use the GPU heavily, so extra workers can cause slowdowns or out-of-memory errors.",
+                "related": "Affected by GPU number, Scale, Frame deduplication, Extra smoothing passes, and output codec.",
             },
             "advanced": {
                 "title": "Workers",
                 "what": "Maps to --workers and is clamped to at least 1.",
-                "how": "process_all() uses a ThreadPoolExecutor when workers > 1. The UI currently starts selected files through the same per-video processing path.",
+                "how": "process_all() uses a ThreadPoolExecutor when workers > 1. Dedup timeline rendering also uses these slots inside a single video's transition render pass.",
                 "implications": "Parallel jobs can contend for CUDA, NVENC, disk, and TensorRT build resources.",
-                "related": "Tune alongside device_index, trt_cache_dir, and encoder limits.",
+                "related": "Tune alongside device_index, dedup settings, trt_cache_dir, and encoder limits.",
             },
         },
         "ensemble": {
@@ -1274,7 +1274,7 @@ def make_app_component():
                     open_help,
                 ),
                 TextField(
-                    "Parallel workers",
+                    "Worker slots",
                     "workers",
                     settings,
                     set_settings,
@@ -1494,7 +1494,7 @@ def make_app_component():
                     open_help,
                 ),
                 TextField(
-                    "Videos to run at once",
+                    "Worker slots",
                     "workers",
                     settings,
                     set_settings,

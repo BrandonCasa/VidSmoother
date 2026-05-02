@@ -80,6 +80,7 @@ By default, VidSmoother reads from `input`, writes processed videos or GIFs to `
 Animated GIFs are written back as `.gif` files. By default, GIF inputs use a timeline-aware path that extracts source frame delays, preserves unusually long holds, runs RIFE on shorter frame transitions, and reassembles a variable-delay GIF with a generated palette. Use `--no-gif-timeline-smoothing` to fall back to the older constant-rate GIF path when deduplication is disabled.
 GIF timeline output uses a 50 fps timing quantum and 720 px width cap by default to keep interpolated GIFs from growing excessively. Use `--gif-max-fps 0` or `--gif-max-width 0` to disable either cap. Unusually long delays at or above the 85th percentile are treated as hard holds by default; tune this with `--gif-hard-hold-percentile`.
 Optional frame deduplication removes repeated or nearly repeated source frames before interpolation. VidSmoother records the timestamp gap left by each removed frame and renders that interval with a larger per-transition RIFE factor, so duplicate cleanup is not run after processing.
+For non-GIF deduplication, `--workers` can render multiple transition pairs from the same video in parallel. Keep this modest on a single GPU because each worker starts its own RIFE/VapourSynth pipeline.
 
 Useful options:
 
@@ -89,6 +90,7 @@ Useful options:
 .\VidSmoother.exe --gif-max-fps 30 --gif-max-width 640
 .\VidSmoother.exe --gif-hard-hold-percentile 90
 .\VidSmoother.exe --dedup-strength 50 --dedup-algorithm cuda-mpdecimate
+.\VidSmoother.exe --dedup-strength 50 --workers 2
 .\VidSmoother.exe --nvenc-codec auto --pix-fmt auto
 .\VidSmoother.exe --nvenc-codec hevc_nvenc --cq 18 --pix-fmt yuv420p10le
 .\VidSmoother.exe --device-index 0 --trt-opt-shape 1920x1080 --trt-max-shape 3840x2160
@@ -195,7 +197,7 @@ Install the optional UI dependencies:
 Start the local ReactPy interface:
 
 ```powershell
-.\.venv\Scripts\python.exe -m vidsmoother.ui --host 127.0.0.1 --port 8764
+.\.venv\Scripts\python.exe ui_main.py --host 127.0.0.1 --port 8764
 ```
 
 Open `http://127.0.0.1:8764`. The interface provides settings for the same pipeline options as the CLI, a media list populated from the input folder, per-file selection, and a processing job panel.

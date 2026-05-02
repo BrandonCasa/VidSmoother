@@ -309,7 +309,13 @@ def render_transition_frames(
         config,
         rife=replace(config.rife, factor_num=slot_count, factor_den=1, scene_change=False),
     )
-    write_vapoursynth_script(pair_video, transition_info, script, transition_config)
+    write_vapoursynth_script(
+        pair_video,
+        transition_info,
+        script,
+        transition_config,
+        frame_limit=slot_count,
+    )
     run_vspipe_to_ffmpeg(
         [config.tools.vspipe, "--container", "y4m", script, "-"],
         [

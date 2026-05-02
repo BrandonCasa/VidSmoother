@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 from vidsmoother.config import (
     DedupOptions,
@@ -20,6 +21,7 @@ from vidsmoother.gif_timeline import (
     centisecond_durations,
     coalesce_duplicate_gif_frames,
     parse_gif_frame_delays,
+    render_transition_frames,
     write_concat_manifest,
 )
 from vidsmoother.media import VideoInfo
@@ -198,6 +200,46 @@ class GifTimelineTests(unittest.TestCase):
         )
 
         self.assertTrue(build_timeline_gif_filter_chain(no_filters).startswith("[0:v]split=2"))
+
+    def test_transition_render_limits_vspipe_clip_to_requested_slots(self) -> None:
+        with TemporaryDirectory() as temp:
+            root = Path(temp)
+            frame = root / "a.png"
+            next_frame = root / "b.png"
+            frame.write_bytes(b"a")
+            next_frame.write_bytes(b"b")
+
+            def fake_pipe(vspipe_command, ffmpeg_command, **kwargs) -> None:
+                pattern = Path(ffmpeg_command[-1])
+                for index in range(1, 5):
+                    (pattern.parent / f"transition_{index:06d}.png").write_bytes(b"png")
+
+            with (
+                patch("vidsmoother.gif_timeline.run_command"),
+                patch("vidsmoother.gif_timeline.run_vspipe_to_ffmpeg", side_effect=fake_pipe),
+                patch("vidsmoother.gif_timeline.write_vapoursynth_script") as write_script,
+            ):
+                rendered = render_transition_frames(
+                    frame,
+                    next_frame,
+                    4,
+                    VideoInfo(
+                        path=Path("input.gif"),
+                        width=320,
+                        height=240,
+                        fps=10.0,
+                        duration=1.0,
+                        codec="gif",
+                        pix_fmt="bgra",
+                        has_audio=False,
+                    ),
+                    root / "transitions",
+                    root / "logs",
+                    config(dedup_strength=50.0),
+                )
+
+            self.assertEqual(len(rendered), 4)
+            self.assertEqual(write_script.call_args.kwargs["frame_limit"], 4)
 
     def test_legacy_gif_command_still_generates_palette_pipeline(self) -> None:
         info = VideoInfo(

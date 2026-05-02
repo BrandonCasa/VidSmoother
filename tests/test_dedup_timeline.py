@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 from tempfile import TemporaryDirectory
+import threading
 import unittest
+from unittest.mock import patch
 
 from vidsmoother.config import (
     DedupOptions,
@@ -15,15 +17,19 @@ from vidsmoother.config import (
 )
 from vidsmoother.dedup_timeline import (
     TimelineFrame,
+    TransitionRenderJob,
     build_timeline_encode_command,
     parse_showinfo_pts,
+    render_transition_jobs,
     render_factor_for_duration,
+    render_transition_frames,
     slot_count_for_duration,
     transition_frame_indices,
     write_timeline_manifest,
 )
 from vidsmoother.media import VideoInfo
 from vidsmoother.pipeline import build_ffmpeg_command
+from vidsmoother.vpy import render_script
 
 
 def config(*, dedup_strength: float = 50.0) -> PipelineConfig:
@@ -167,6 +173,84 @@ class DedupTimelineTests(unittest.TestCase):
         self.assertNotIn("mpdecimate", command_text)
         self.assertIn("-fps_mode:v vfr", command_text)
         self.assertIn("-map 1:a:0?", command_text)
+
+    def test_transition_render_limits_vspipe_clip_to_requested_slots(self) -> None:
+        with TemporaryDirectory() as temp:
+            root = Path(temp)
+            frame = root / "a.png"
+            next_frame = root / "b.png"
+            frame.write_bytes(b"a")
+            next_frame.write_bytes(b"b")
+
+            def fake_pipe(vspipe_command, ffmpeg_command, **kwargs) -> None:
+                pattern = Path(ffmpeg_command[-1])
+                for index in range(1, 5):
+                    (pattern.parent / f"transition_{index:06d}.png").write_bytes(b"png")
+
+            with (
+                patch("vidsmoother.dedup_timeline.run_command"),
+                patch("vidsmoother.dedup_timeline.run_vspipe_to_ffmpeg", side_effect=fake_pipe),
+                patch("vidsmoother.dedup_timeline.write_vapoursynth_script") as write_script,
+            ):
+                rendered = render_transition_frames(
+                    frame,
+                    next_frame,
+                    4,
+                    video_info(has_audio=False),
+                    root / "transitions",
+                    root / "logs",
+                    config(),
+                )
+
+            self.assertEqual(len(rendered), 4)
+            self.assertEqual(write_script.call_args.kwargs["frame_limit"], 4)
+
+    def test_parallel_transition_render_prewarms_uncached_transition(self) -> None:
+        with TemporaryDirectory() as temp:
+            root = Path(temp)
+            frames = [root / f"{name}.png" for name in ("a", "b", "c")]
+            for index, frame in enumerate(frames):
+                frame.write_bytes(f"frame-{index}".encode("ascii"))
+
+            cfg = config()
+            cfg = PipelineConfig(**{**cfg.__dict__, "workers": 2})
+            calls: list[str] = []
+
+            def fake_pipe(vspipe_command, ffmpeg_command, **kwargs) -> None:
+                calls.append(threading.current_thread().name)
+                pattern = Path(ffmpeg_command[-1])
+                slot_count = int(ffmpeg_command[ffmpeg_command.index("-frames:v") + 1])
+                for index in range(1, slot_count + 1):
+                    (pattern.parent / f"transition_{index:06d}.png").write_bytes(b"png")
+
+            jobs = [
+                TransitionRenderJob(0, frames[0], frames[1], 4, (0, 1, 2, 3)),
+                TransitionRenderJob(1, frames[1], frames[2], 4, (0, 1, 2, 3)),
+            ]
+
+            with (
+                patch("vidsmoother.dedup_timeline.run_command"),
+                patch("vidsmoother.dedup_timeline.run_vspipe_to_ffmpeg", side_effect=fake_pipe),
+                patch("vidsmoother.dedup_timeline.write_vapoursynth_script"),
+            ):
+                rendered = render_transition_jobs(
+                    jobs,
+                    video_info(has_audio=False),
+                    root / "transitions",
+                    root / "logs",
+                    cfg,
+                )
+
+            self.assertEqual(set(rendered), {0, 1})
+            self.assertEqual(calls[0], "MainThread")
+
+    def test_vapoursynth_script_applies_frame_limit_before_output_format(self) -> None:
+        script = render_script(Path("pair.mkv"), video_info(has_audio=False), config(), frame_limit=4)
+
+        self.assertIn(
+            "clip = clip[:4]\nclip = core.resize.Bicubic(clip, format=vs.YUV420P8",
+            script,
+        )
 
     def test_regular_ffmpeg_command_has_no_post_dedup_filter(self) -> None:
         command = build_ffmpeg_command(video_info(), Path("output.mp4"), config())

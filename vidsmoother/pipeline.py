@@ -36,8 +36,9 @@ def process_all(config: PipelineConfig) -> None:
             process_video(video, config)
         return
 
+    per_video_config = replace(config, workers=1)
     with ThreadPoolExecutor(max_workers=config.workers) as executor:
-        futures = [executor.submit(process_video, video, config) for video in videos]
+        futures = [executor.submit(process_video, video, per_video_config) for video in videos]
         for future in as_completed(futures):
             future.result()
 

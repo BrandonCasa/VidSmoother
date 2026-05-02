@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, replace
 import hashlib
 import re
+from threading import Lock
 from pathlib import Path
 
 from .config import PipelineConfig
@@ -11,6 +13,8 @@ from .filters import build_dedup_filter
 from .media import VideoInfo
 from .runner import run_command, run_vspipe_to_ffmpeg
 from .vpy import write_vapoursynth_script
+
+_TRT_CACHE_BUILD_LOCK = Lock()
 
 
 @dataclass(frozen=True)
@@ -23,6 +27,22 @@ class DedupedSourceFrame:
 class TimelineFrame:
     path: Path
     duration: float
+
+
+@dataclass(frozen=True)
+class TransitionRenderJob:
+    index: int
+    frame: Path
+    next_frame: Path
+    slot_count: int
+    frame_indices: tuple[int, ...]
+
+
+@dataclass(frozen=True)
+class RenderedTransition:
+    index: int
+    frame_indices: tuple[int, ...]
+    frames: list[Path]
 
 
 def process_dedup_timeline(
@@ -134,12 +154,13 @@ def render_timeline_frames(
     frame_period = 1.0 / info.fps
     target_period = 1.0 / target_fps
     timeline_origin = source_frames[0].pts
-    rendered: list[TimelineFrame] = []
+    jobs: list[TransitionRenderJob] = []
+    tail_frame: TimelineFrame | None = None
 
     for index, source_frame in enumerate(source_frames):
         if index + 1 >= len(source_frames):
             tail_duration = max(frame_period, info.duration - source_frame.pts)
-            rendered.append(TimelineFrame(source_frame.path, tail_duration))
+            tail_frame = TimelineFrame(source_frame.path, tail_duration)
             continue
 
         next_frame = source_frames[index + 1]
@@ -152,21 +173,132 @@ def render_timeline_frames(
             target_fps,
             render_factor,
         )
-        transition_frames = render_transition_frames(
-            source_frame.path,
-            next_frame.path,
-            render_factor,
-            info,
+        jobs.append(
+            TransitionRenderJob(
+                index=index,
+                frame=source_frame.path,
+                next_frame=next_frame.path,
+                slot_count=render_factor,
+                frame_indices=tuple(frame_indices),
+            )
+        )
+
+    transitions = render_transition_jobs(jobs, info, transition_dir, logs, config)
+    rendered: list[TimelineFrame] = []
+    for job in jobs:
+        transition_frames = transitions[job.index].frames
+        rendered.extend(
+            TimelineFrame(transition_frames[frame_index], target_period)
+            for frame_index in job.frame_indices
+        )
+    if tail_frame is not None:
+        rendered.append(tail_frame)
+
+    return rendered
+
+
+def render_transition_jobs(
+    jobs: list[TransitionRenderJob],
+    source_info: VideoInfo,
+    transition_dir: Path,
+    logs: Path,
+    config: PipelineConfig,
+) -> dict[int, RenderedTransition]:
+    if not jobs:
+        return {}
+
+    max_workers = min(max(1, config.workers), len(jobs))
+    rendered: dict[int, RenderedTransition] = {}
+    remaining_jobs = list(jobs)
+
+    if max_workers > 1:
+        warmup_job = next(
+            (job for job in jobs if not transition_frames_cached(job, transition_dir, config)),
+            None,
+        )
+        if warmup_job is not None:
+            with _TRT_CACHE_BUILD_LOCK:
+                transition = render_transition_job(warmup_job, source_info, transition_dir, logs, config)
+            rendered[transition.index] = transition
+            remaining_jobs = [job for job in jobs if job.index != warmup_job.index]
+
+    if max_workers <= 1:
+        return {
+            job.index: render_transition_job(job, source_info, transition_dir, logs, config)
+            for job in jobs
+        }
+    if not remaining_jobs:
+        return rendered
+
+    cache_locks: dict[str, Lock] = {}
+    cache_locks_guard = Lock()
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [
+            executor.submit(
+                render_transition_job,
+                job,
+                source_info,
+                transition_dir,
+                logs,
+                config,
+                cache_locks,
+                cache_locks_guard,
+            )
+            for job in remaining_jobs
+        ]
+        for future in as_completed(futures):
+            transition = future.result()
+            rendered[transition.index] = transition
+    return rendered
+
+
+def render_transition_job(
+    job: TransitionRenderJob,
+    source_info: VideoInfo,
+    transition_dir: Path,
+    logs: Path,
+    config: PipelineConfig,
+    cache_locks: dict[str, Lock] | None = None,
+    cache_locks_guard: Lock | None = None,
+) -> RenderedTransition:
+    cache_key = transition_cache_key(job.frame, job.next_frame, job.slot_count, config)
+    if cache_locks is not None and cache_locks_guard is not None:
+        with cache_locks_guard:
+            cache_lock = cache_locks.setdefault(cache_key, Lock())
+        with cache_lock:
+            frames = render_transition_frames(
+                job.frame,
+                job.next_frame,
+                job.slot_count,
+                source_info,
+                transition_dir,
+                logs,
+                config,
+                cache_key=cache_key,
+            )
+    else:
+        frames = render_transition_frames(
+            job.frame,
+            job.next_frame,
+            job.slot_count,
+            source_info,
             transition_dir,
             logs,
             config,
+            cache_key=cache_key,
         )
-        rendered.extend(
-            TimelineFrame(transition_frames[frame_index], target_period)
-            for frame_index in frame_indices
-        )
+    return RenderedTransition(job.index, job.frame_indices, frames)
 
-    return rendered
+
+def transition_frames_cached(
+    job: TransitionRenderJob,
+    transition_dir: Path,
+    config: PipelineConfig,
+) -> bool:
+    if job.slot_count <= 1:
+        return True
+    cache_key = transition_cache_key(job.frame, job.next_frame, job.slot_count, config)
+    return len(list((transition_dir / cache_key).glob("transition_*.png"))) >= job.slot_count
 
 
 def slot_count_for_duration(duration: float, target_fps: float) -> int:
@@ -217,11 +349,13 @@ def render_transition_frames(
     transition_dir: Path,
     logs: Path,
     config: PipelineConfig,
+    *,
+    cache_key: str | None = None,
 ) -> list[Path]:
     if slot_count <= 1:
         return [frame]
 
-    cache_key = transition_cache_key(frame, next_frame, slot_count, config)
+    cache_key = cache_key or transition_cache_key(frame, next_frame, slot_count, config)
     output_dir = transition_dir / cache_key
     output_pattern = output_dir / "transition_%06d.png"
     cached = sorted(output_dir.glob("transition_*.png"))
@@ -268,7 +402,13 @@ def render_transition_frames(
         config,
         rife=replace(config.rife, factor_num=slot_count, factor_den=1),
     )
-    write_vapoursynth_script(pair_video, transition_info, script, transition_config)
+    write_vapoursynth_script(
+        pair_video,
+        transition_info,
+        script,
+        transition_config,
+        frame_limit=slot_count,
+    )
     run_vspipe_to_ffmpeg(
         [config.tools.vspipe, "--container", "y4m", script, "-"],
         [

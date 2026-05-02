@@ -43,7 +43,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--workers",
         type=int,
         default=1,
-        help="Number of videos to process in parallel.",
+        help=(
+            "Worker slots for parallel video processing. When processing one deduped video, "
+            "the same slots are used for its transition renders."
+        ),
     )
 
     parser.add_argument("--ffmpeg", help="Path or command name for ffmpeg.")
