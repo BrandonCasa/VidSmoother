@@ -11,7 +11,6 @@ from typing import Any
 
 from .config import PipelineConfig
 from .errors import VidSmootherError
-from .filters import build_dedup_filter
 from .media import VideoInfo
 from .runner import run_command, run_vspipe_to_ffmpeg
 from .tools import bundled_runtime_env
@@ -69,6 +68,7 @@ def process_gif_timeline(
         raise VidSmootherError(f"No GIF frames were extracted from {video}")
 
     delays_ms = normalize_delay_count(delays_ms, len(source_frames), fallback_ms)
+    source_frames, delays_ms = coalesce_duplicate_gif_frames(source_frames, delays_ms, config)
     quantum_ms = 1000.0 / config.gif.max_fps if config.gif.max_fps else fallback_ms
     segments = build_timeline_segments(
         delays_ms,
@@ -152,6 +152,36 @@ def normalize_delay_count(delays_ms: list[float], frame_count: int, fallback_ms:
     return delays_ms + [fallback_ms for _ in range(frame_count - len(delays_ms))]
 
 
+def coalesce_duplicate_gif_frames(
+    source_frames: list[Path],
+    delays_ms: list[float],
+    config: PipelineConfig,
+) -> tuple[list[Path], list[float]]:
+    if config.dedup.strength <= 0 or not source_frames:
+        return source_frames, delays_ms
+
+    kept_frames = [source_frames[0]]
+    kept_delays = [delays_ms[0]]
+    for frame, delay_ms in zip(source_frames[1:], delays_ms[1:], strict=True):
+        if gif_frames_are_duplicates(kept_frames[-1], frame, config):
+            kept_delays[-1] += delay_ms
+            continue
+        kept_frames.append(frame)
+        kept_delays.append(delay_ms)
+
+    if len(kept_frames) > 1 and gif_frames_are_duplicates(kept_frames[-1], kept_frames[0], config):
+        kept_delays[0] += kept_delays.pop()
+        kept_frames.pop()
+
+    return kept_frames, kept_delays
+
+
+def gif_frames_are_duplicates(frame: Path, next_frame: Path, config: PipelineConfig) -> bool:
+    if file_sha256(frame) == file_sha256(next_frame):
+        return True
+    return config.dedup.strength > 0 and frames_are_near_duplicate(frame, next_frame, config)
+
+
 def build_timeline_segments(
     delays_ms: list[float],
     *,
@@ -216,9 +246,7 @@ def should_hold_segment(
 ) -> bool:
     if segment.hard_hold or len(segment.durations) <= 1:
         return True
-    if file_sha256(frame) == file_sha256(next_frame):
-        return True
-    if config.dedup.strength > 0 and frames_are_near_duplicate(frame, next_frame, config):
+    if gif_frames_are_duplicates(frame, next_frame, config):
         return True
     if config.dedup.strength == 0:
         return True
@@ -360,10 +388,6 @@ def build_timeline_gif_filter_chain(config: PipelineConfig) -> str:
     if config.gif.max_width is not None:
         filters.append(f"scale=w='min(iw\\,{config.gif.max_width})':h=-2:flags=lanczos")
 
-    dedup_filter = build_dedup_filter(config)
-    if dedup_filter:
-        filters.append(dedup_filter)
-
     pre_palette = ",".join(filters)
     source = f"[0:v]{pre_palette},split" if pre_palette else "[0:v]split"
     return (
@@ -421,27 +445,31 @@ def transition_cache_key(frame: Path, next_frame: Path, slot_count: int, config:
 
 
 def frames_are_near_duplicate(frame: Path, next_frame: Path, config: PipelineConfig) -> bool:
-    result = subprocess.run(
-        [
-            str(config.tools.ffmpeg),
-            "-hide_banner",
-            "-i",
-            str(frame),
-            "-i",
-            str(next_frame),
-            "-filter_complex",
-            "[0:v][1:v]blend=all_mode=difference,format=gray,signalstats,metadata=print:file=-",
-            "-frames:v",
-            "1",
-            "-f",
-            "null",
-            "-",
-        ],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        env=bundled_runtime_env(),
-    )
+    try:
+        result = subprocess.run(
+            [
+                str(config.tools.ffmpeg),
+                "-hide_banner",
+                "-i",
+                str(frame),
+                "-i",
+                str(next_frame),
+                "-filter_complex",
+                "[0:v][1:v]blend=all_mode=difference,format=gray,signalstats,metadata=print:file=-",
+                "-frames:v",
+                "1",
+                "-f",
+                "null",
+                "-",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=bundled_runtime_env(),
+        )
+    except OSError:
+        return False
+
     if result.returncode != 0:
         return False
 

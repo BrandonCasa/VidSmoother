@@ -6,7 +6,7 @@ import subprocess
 from pathlib import Path
 
 from .config import PipelineConfig
-from .filters import build_dedup_filter
+from .dedup_timeline import process_dedup_timeline
 from .gif_timeline import process_gif_timeline
 from .media import VideoInfo, iter_videos, probe_video
 from .runner import run_command, run_vspipe_to_ffmpeg
@@ -59,8 +59,13 @@ def process_video(video: Path, config: PipelineConfig) -> Path:
         f"{info.fps:.3f}fps x {config.rife.factor_num}/{config.rife.factor_den} via TensorRT"
     )
 
-    if info.is_gif and config.gif.timeline_smoothing:
+    if info.is_gif and (config.gif.timeline_smoothing or config.dedup.strength > 0):
         output = process_gif_timeline(video, info, output, video_work, logs, config)
+        print(f"  Output: {output}")
+        return output
+
+    if config.dedup.strength > 0:
+        output = process_dedup_timeline(video, info, output, video_work, logs, config)
         print(f"  Output: {output}")
         return output
 
@@ -141,33 +146,11 @@ def build_ffmpeg_command(info: VideoInfo, output: Path, config: PipelineConfig) 
         "0:v:0",
     ]
 
-    dedup_filter = build_dedup_filter(config)
-    if dedup_filter:
-        command.extend(["-vf", dedup_filter, "-fps_mode:v", "vfr"])
-
     if info.has_audio and config.nvenc.audio_codec != "none":
         command.extend(["-map", "1:a:0?"])
 
     video_encoder = resolve_video_encoder(info, config)
-    command.extend(["-c:v", video_encoder])
-
-    using_nvenc = video_encoder.endswith("_nvenc")
-    if using_nvenc:
-        command.extend(["-preset", config.nvenc.preset, "-rc", config.nvenc.rate_control])
-
-    if using_nvenc and config.nvenc.cq is not None:
-        command.extend(["-cq", str(config.nvenc.cq)])
-    if using_nvenc and config.nvenc.qp is not None:
-        command.extend(["-qp", str(config.nvenc.qp)])
-    if config.nvenc.bitrate:
-        command.extend(["-b:v", config.nvenc.bitrate])
-    if config.nvenc.maxrate:
-        command.extend(["-maxrate", config.nvenc.maxrate])
-    if config.nvenc.bufsize:
-        command.extend(["-bufsize", config.nvenc.bufsize])
-
-    pix_fmt = info.pix_fmt if config.nvenc.pix_fmt == "auto" else config.nvenc.pix_fmt
-    command.extend(["-pix_fmt", pix_fmt])
+    append_video_encode_options(command, video_encoder, info, config)
 
     if info.has_audio and config.nvenc.audio_codec == "none":
         command.append("-an")
@@ -192,8 +175,6 @@ def build_gif_ffmpeg_command(info: VideoInfo, output: Path, config: PipelineConf
         "-loop",
         "0",
     ]
-    if build_dedup_filter(config):
-        command.extend(["-fps_mode:v", "vfr"])
     command.append(output)
     return command
 
@@ -208,10 +189,6 @@ def build_gif_filter_chain(info: VideoInfo, config: PipelineConfig) -> str:
         pre_palette_filters.append(
             f"scale=w='min(iw\\,{config.gif.max_width})':h=-2:flags=lanczos"
         )
-
-    dedup_filter = build_dedup_filter(config)
-    if dedup_filter:
-        pre_palette_filters.append(dedup_filter)
 
     pre_palette = ",".join(pre_palette_filters)
     return (
@@ -230,6 +207,33 @@ def resolve_video_encoder(info: VideoInfo, config: PipelineConfig) -> str:
         return nvenc_encoder
 
     return info.codec
+
+
+def append_video_encode_options(
+    command: list[object],
+    video_encoder: str,
+    info: VideoInfo,
+    config: PipelineConfig,
+) -> None:
+    command.extend(["-c:v", video_encoder])
+
+    using_nvenc = video_encoder.endswith("_nvenc")
+    if using_nvenc:
+        command.extend(["-preset", config.nvenc.preset, "-rc", config.nvenc.rate_control])
+
+    if using_nvenc and config.nvenc.cq is not None:
+        command.extend(["-cq", str(config.nvenc.cq)])
+    if using_nvenc and config.nvenc.qp is not None:
+        command.extend(["-qp", str(config.nvenc.qp)])
+    if config.nvenc.bitrate:
+        command.extend(["-b:v", config.nvenc.bitrate])
+    if config.nvenc.maxrate:
+        command.extend(["-maxrate", config.nvenc.maxrate])
+    if config.nvenc.bufsize:
+        command.extend(["-bufsize", config.nvenc.bufsize])
+
+    pix_fmt = info.pix_fmt if config.nvenc.pix_fmt == "auto" else config.nvenc.pix_fmt
+    command.extend(["-pix_fmt", pix_fmt])
 
 
 def encoder_available(ffmpeg: Path, encoder: str) -> bool:

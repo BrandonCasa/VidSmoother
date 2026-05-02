@@ -150,7 +150,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--no-gif-timeline-smoothing",
         action="store_true",
-        help="Use the older constant-rate GIF path instead of preserving variable GIF frame delays.",
+        help=(
+            "Use the older constant-rate GIF path instead of preserving variable GIF frame delays. "
+            "GIF deduplication still uses the timeline path so duplicates are handled before interpolation."
+        ),
     )
     parser.add_argument(
         "--gif-hard-hold-percentile",
@@ -162,13 +165,19 @@ def build_parser() -> argparse.ArgumentParser:
         "--dedup-strength",
         type=float,
         default=0.0,
-        help="Timestamp-preserving duplicate frame removal strength from 0 to 100. 0 disables deduplication.",
+        help=(
+            "Pre-interpolation duplicate frame removal strength from 0 to 100. "
+            "Removed source-frame gaps are filled with gap-sized RIFE transitions. 0 disables deduplication."
+        ),
     )
     parser.add_argument(
         "--dedup-algorithm",
         choices=["mpdecimate", "cuda-mpdecimate"],
         default="cuda-mpdecimate",
-        help="Duplicate detection algorithm. cuda-mpdecimate uses CUDA filtering before FFmpeg duplicate scoring.",
+        help=(
+            "Duplicate detection algorithm for the source prepass. "
+            "cuda-mpdecimate uses CUDA filtering before FFmpeg duplicate scoring."
+        ),
     )
     parser.add_argument(
         "--subtitle-mode",

@@ -77,9 +77,9 @@ copy C:\videos\example.mp4 .\input\
 
 By default, VidSmoother reads from `input`, writes processed videos or GIFs to `output`, and stores temporary work files under `output\_work` beside the executable.
 
-Animated GIFs are written back as `.gif` files. By default, GIF inputs use a timeline-aware path that extracts source frame delays, preserves unusually long holds, runs RIFE on shorter frame transitions, and reassembles a variable-delay GIF with a generated palette. Use `--no-gif-timeline-smoothing` to fall back to the older constant-rate GIF path.
+Animated GIFs are written back as `.gif` files. By default, GIF inputs use a timeline-aware path that extracts source frame delays, preserves unusually long holds, runs RIFE on shorter frame transitions, and reassembles a variable-delay GIF with a generated palette. Use `--no-gif-timeline-smoothing` to fall back to the older constant-rate GIF path when deduplication is disabled.
 GIF timeline output uses a 50 fps timing quantum and 720 px width cap by default to keep interpolated GIFs from growing excessively. Use `--gif-max-fps 0` or `--gif-max-width 0` to disable either cap. Unusually long delays at or above the 85th percentile are treated as hard holds by default; tune this with `--gif-hard-hold-percentile`.
-Optional frame deduplication can remove repeated or nearly repeated frames after interpolation while preserving timestamps. For GIFs, that means skipped frames become longer GIF frame delays instead of shortening playback.
+Optional frame deduplication removes repeated or nearly repeated source frames before interpolation. VidSmoother records the timestamp gap left by each removed frame and renders that interval with a larger per-transition RIFE factor, so duplicate cleanup is not run after processing.
 
 Useful options:
 

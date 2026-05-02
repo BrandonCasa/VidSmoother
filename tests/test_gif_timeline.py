@@ -18,6 +18,7 @@ from vidsmoother.gif_timeline import (
     build_timeline_gif_filter_chain,
     build_timeline_segments,
     centisecond_durations,
+    coalesce_duplicate_gif_frames,
     parse_gif_frame_delays,
     write_concat_manifest,
 )
@@ -138,6 +139,23 @@ class GifTimelineTests(unittest.TestCase):
         self.assertEqual(len(durations), 4)
         self.assertAlmostEqual(sum(durations), 0.10)
 
+    def test_coalesce_duplicate_gif_frames_merges_delays_before_interpolation(self) -> None:
+        with TemporaryDirectory() as temp:
+            root = Path(temp)
+            first = root / "a.png"
+            duplicate = root / "b.png"
+            first.write_bytes(b"same")
+            duplicate.write_bytes(b"same")
+
+            frames, delays = coalesce_duplicate_gif_frames(
+                [first, duplicate],
+                [40.0, 40.0],
+                config(dedup_strength=50.0),
+            )
+
+        self.assertEqual(frames, [first])
+        self.assertEqual(delays, [80.0])
+
     def test_concat_manifest_uses_explicit_durations_and_last_file_repeat(self) -> None:
         with TemporaryDirectory() as temp:
             root = Path(temp)
@@ -161,9 +179,9 @@ class GifTimelineTests(unittest.TestCase):
             self.assertIn("duration 0.300000", text)
             self.assertTrue(text.rstrip().endswith("b.png'"))
 
-    def test_timeline_filter_applies_width_and_optional_dedup(self) -> None:
+    def test_timeline_filter_applies_width_without_post_dedup(self) -> None:
         self.assertIn("scale=w='min(iw\\,720)'", build_timeline_gif_filter_chain(config()))
-        self.assertIn("mpdecimate=", build_timeline_gif_filter_chain(config(dedup_strength=50.0)))
+        self.assertNotIn("mpdecimate=", build_timeline_gif_filter_chain(config(dedup_strength=50.0)))
 
     def test_timeline_filter_is_valid_without_width_or_dedup(self) -> None:
         base = config()

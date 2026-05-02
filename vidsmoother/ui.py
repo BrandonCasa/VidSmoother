@@ -879,9 +879,9 @@ def make_app_component():
         "dedup_preset": {
             "beginner": {
                 "title": "Frame deduplication",
-                "what": "This removes repeated or nearly repeated frames after smoothing.",
-                "how": "Medium and Strong map to numeric duplicate-detection strengths. Removed frames keep their timestamp gaps, so GIFs can store the skipped time as longer frame delays.",
-                "implications": "Medium is conservative. Strong can make held animation much smaller, but may remove subtle motion if the source barely changes.",
+                "what": "This removes repeated or nearly repeated source frames before smoothing.",
+                "how": "Medium and Strong map to numeric duplicate-detection strengths. Removed source-frame gaps are tracked, then RIFE renders a longer transition across each gap.",
+                "implications": "Medium is conservative. Strong can smooth through more held frames, but may treat subtle low-contrast motion as duplicate source material.",
                 "related": "Works with smoothness boost, GIF frame rate limit, and the advanced dedup strength.",
             },
             "advanced": {
@@ -895,19 +895,19 @@ def make_app_component():
         "dedup_strength": {
             "advanced": {
                 "title": "Dedup strength",
-                "what": "Controls how aggressively near-duplicate frames are removed.",
-                "how": "The value maps to FFmpeg duplicate thresholds. 0 disables deduplication; higher values tolerate more pixel difference before a frame is kept.",
-                "implications": "High values are useful for GIF holds and very static video, but can remove subtle movement or low-contrast animation.",
-                "related": "Dedup algorithm and GIF frame delay behavior.",
+                "what": "Controls how aggressively near-duplicate source frames are removed before interpolation.",
+                "how": "The value maps to FFmpeg duplicate thresholds. 0 disables deduplication; higher values tolerate more pixel difference before a source frame is kept.",
+                "implications": "High values are useful for held animation and very static video, but can remove subtle movement or low-contrast animation.",
+                "related": "Dedup algorithm and RIFE factor settings.",
             },
         },
         "dedup_algorithm": {
             "advanced": {
                 "title": "Dedup algorithm",
                 "what": "Chooses the filter chain used for duplicate detection.",
-                "how": "mpdecimate uses FFmpeg's pixel-threshold duplicate detector. cuda-mpdecimate runs CUDA upload/scale/download filtering before the same duplicate scoring stage.",
+                "how": "mpdecimate uses FFmpeg's pixel-threshold duplicate detector during the source prepass. cuda-mpdecimate runs CUDA upload/scale/download filtering before the same duplicate scoring stage.",
                 "implications": "The CUDA option requires an FFmpeg build with CUDA filters and NVIDIA support; unsupported builds will fail in ffmpeg.log.",
-                "related": "Dedup strength and FFmpeg path.",
+                "related": "Dedup strength and the pre-interpolation timeline path.",
             },
         },
         "ffmpeg": {
