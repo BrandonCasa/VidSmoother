@@ -273,7 +273,7 @@ jobs:
             --extra-index-url $env:TORCH_INDEX_URL `
             --extra-index-url $env:NVIDIA_PYPI_URL
 
-          & $python -m pip install --upgrade --force-reinstall `
+          & $python -m pip install --upgrade `
             @pipConstraints `
             torch torchvision torch_tensorrt `
             --extra-index-url $env:TORCH_INDEX_URL `
@@ -319,7 +319,7 @@ jobs:
             --extra-index-url $env:TORCH_INDEX_URL `
             --extra-index-url $env:NVIDIA_PYPI_URL
 
-          & $python -m pip install --upgrade --force-reinstall `
+          & $python -m pip install --upgrade `
             @pipConstraints `
             --target $env:RUNTIME_SITE_PACKAGES `
             torch torchvision torch_tensorrt `
