@@ -273,8 +273,6 @@ jobs:
             --extra-index-url $env:TORCH_INDEX_URL `
             --extra-index-url $env:NVIDIA_PYPI_URL
 
-          & $python -m pip install --upgrade @pipConstraints nvidia-modelopt[all] triton-windows
-
           & $python -m pip install --upgrade --force-reinstall `
             @pipConstraints `
             torch torchvision torch_tensorrt `
@@ -312,7 +310,14 @@ jobs:
             Write-Host "vspipe.exe was not found in python-scripts; bundled VapourSynth copy will be used from libs\vapoursynth."
           }
 
-          & $python -m pip install --upgrade @pipConstraints nvidia-modelopt[all] triton-windows --target $env:RUNTIME_SITE_PACKAGES
+          # Bundle modelopt into the runtime site-packages only. The build venv does not need it,
+          # and installing it there can trigger resolver issues against the pinned Torch build.
+          & $python -m pip install --upgrade `
+            @pipConstraints `
+            nvidia-modelopt[all] triton-windows `
+            --target $env:RUNTIME_SITE_PACKAGES `
+            --extra-index-url $env:TORCH_INDEX_URL `
+            --extra-index-url $env:NVIDIA_PYPI_URL
 
           & $python -m pip install --upgrade --force-reinstall `
             @pipConstraints `
