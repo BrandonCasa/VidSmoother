@@ -27,6 +27,11 @@ on:
         required: true
         default: v1
         type: string
+      ignore_workflow_changes_for_caching:
+        description: Reuse the Python build/runtime cache even if this workflow file changed
+        required: true
+        default: false
+        type: boolean
       lsmash_release:
         description: HomeOfAviSynthPlusEvolution/L-SMASH-Works release tag, or latest
         required: true
@@ -85,6 +90,20 @@ jobs:
           path: .cache/release-downloads
           key: release-downloads-${{ runner.os }}-ffmpeg-${{ inputs.ffmpeg_release }}-lsmash-${{ inputs.lsmash_release }}
 
+      - name: Compute workflow cache fingerprint
+        id: workflow-cache-fingerprint
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          if ("${{ inputs.ignore_workflow_changes_for_caching }}" -eq "true") {
+            "value=ignored" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding ascii
+            Write-Host "Ignoring workflow file changes when computing the Python build/runtime cache key."
+          } else {
+            $workflowFile = Join-Path $env:GITHUB_WORKSPACE ".github\workflows\windows-release.yml"
+            $workflowHash = (Get-FileHash -Algorithm SHA256 -Path $workflowFile).Hash.ToLowerInvariant()
+            "value=$workflowHash" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding ascii
+          }
+
       - name: Prepare build layout
         shell: pwsh
         run: |
@@ -107,7 +126,7 @@ jobs:
             .venv-build
             ${{ runner.temp }}\bundle\python\site-packages
             ${{ runner.temp }}\bundle\python-scripts
-          key: python-build-runtime-${{ inputs.python_package_cache_version }}-${{ runner.os }}-py-${{ inputs.python_version }}-torch-cu130-vs-${{ inputs.vapoursynth_release }}-${{ hashFiles('requirements-ui.txt', 'requirements-trt.txt', 'requirements-release-lock.txt', 'extern/vs-rife/pyproject.toml', '.github/workflows/windows-release.yml') }}
+          key: python-build-runtime-${{ inputs.python_package_cache_version }}-${{ runner.os }}-py-${{ inputs.python_version }}-torch-cu130-vs-${{ inputs.vapoursynth_release }}-${{ hashFiles('requirements-ui.txt', 'requirements-trt.txt', 'requirements-release-lock.txt', 'extern/vs-rife/pyproject.toml') }}-${{ steps.workflow-cache-fingerprint.outputs.value }}
 
       - name: Resolve selected release assets
         shell: pwsh

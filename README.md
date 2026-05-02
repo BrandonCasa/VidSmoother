@@ -278,14 +278,16 @@ Use the GitHub Actions workflow instead of a local setup script:
 5. Set `python_version`, usually `3.12`.
 6. Leave the fixed defaults for reproducible builds, or set `ffmpeg_release`, `vapoursynth_release`, and `lsmash_release` explicitly.
 7. Type `latest` into a component input only when you intentionally want the latest matching release or package for that run.
-8. Bump `python_package_cache_version` when you need to force-refresh the cached Python build/runtime packages.
-9. Set `publish_release` to `true` only when you want the workflow to create a GitHub release.
+8. Leave `ignore_workflow_changes_for_caching` off for normal runs so edits to the workflow file invalidate the Python build/runtime cache.
+9. Turn on `ignore_workflow_changes_for_caching` only when you intentionally want to reuse that cache after changing the workflow.
+10. Bump `python_package_cache_version` when you need to force-refresh the cached Python build/runtime packages.
+11. Set `publish_release` to `true` only when you want the workflow to create a GitHub release.
 
 The workflow is manual-only. It does not run on pushes, pull requests, tags, schedules, or release events.
 
 Version inputs and Python dependencies are pinned in the repository:
 
-- `.github/workflows/windows-release.yml` defines the manual release workflow, fixed component defaults, cache keys, and `latest` override behavior.
+- `.github/workflows/windows-release.yml` defines the manual release workflow, fixed component defaults, cache keys, the `ignore_workflow_changes_for_caching` cache override, and `latest` behavior.
 - `requirements-ui.txt` pins the direct ReactPy interface dependencies.
 - `requirements-trt.txt` pins the direct VapourSynth, RIFE, PyTorch, Torch-TensorRT, TensorRT, and NVIDIA runtime dependencies.
 - `requirements-release-lock.txt` pins the full transitive Python package set resolved for the Windows NVIDIA release workflow on Python 3.12.
