@@ -120,7 +120,7 @@ torch==2.11.0+cu130
 torch-tensorrt==2.11.0+cu130
 torchvision==0.26.0+cu130
 tqdm==4.67.3
-transformers==4.57.6
+transformers==5.0.0rc3
 triton-windows==3.6.0.post26
 trove-classifiers==2026.4.28.13
 typer==0.25.1
