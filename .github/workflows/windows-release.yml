@@ -64,17 +64,27 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v6.0.2
         with:
           submodules: recursive
 
+      - name: Put Git Unix tools on PATH
+        shell: pwsh
+        run: |
+          $gitUsrBin = "C:\Program Files\Git\usr\bin"
+          if (Test-Path $gitUsrBin) {
+            "$gitUsrBin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding ascii
+          } else {
+            Write-Warning "Git usr\bin was not found at $gitUsrBin; cache compression may fail if gzip is unavailable."
+          }
+
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v6.2.0
         with:
           python-version: ${{ inputs.python_version }}
 
       - name: Cache append-only Python package artifacts
-        uses: actions/cache@v5
+        uses: actions/cache@v5.0.5
         with:
           path: |
             .cache/pip
@@ -85,7 +95,7 @@ jobs:
 
       - name: Cache selected release downloads
         if: ${{ inputs.ffmpeg_release != 'latest' && inputs.lsmash_release != 'latest' }}
-        uses: actions/cache@v5
+        uses: actions/cache@v5.0.5
         with:
           path: .cache/release-downloads
           key: release-downloads-${{ runner.os }}-ffmpeg-${{ inputs.ffmpeg_release }}-lsmash-${{ inputs.lsmash_release }}
@@ -120,7 +130,7 @@ jobs:
 
       - name: Cache Python build and runtime packages
         id: python-package-cache
-        uses: actions/cache@v5
+        uses: actions/cache@v5.0.5
         with:
           path: |
             .venv-build
@@ -868,7 +878,7 @@ jobs:
           $archiveParts | ForEach-Object { Write-Host "$($_.Name): $($_.Length) bytes" }
 
       - name: Upload package artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: ${{ env.PACKAGE_NAME }}-${{ inputs.version }}
           path: ${{ env.ARCHIVE_GLOB }}
@@ -876,7 +886,7 @@ jobs:
 
       - name: Publish GitHub release
         if: ${{ inputs.publish_release }}
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@v3.0.0
         with:
           tag_name: ${{ inputs.version }}
           name: VidSmoother ${{ inputs.version }} Windows 11 NVIDIA
