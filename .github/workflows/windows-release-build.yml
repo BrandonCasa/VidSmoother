@@ -272,6 +272,17 @@ jobs:
           $vapourSynthBundle = Join-Path $env:BUNDLE_ROOT "libs\vapoursynth"
           $bundleScriptsDir = Join-Path $env:BUNDLE_ROOT "python-scripts"
           $constraintsFile = Join-Path $env:GITHUB_WORKSPACE "requirements-release-lock.txt"
+          $cuda12RuntimePackages = @(
+            "cutensor-cu12",
+            "nvidia-cublas-cu12",
+            "nvidia-cuda-nvrtc-cu12",
+            "nvidia-cuda-runtime-cu12",
+            "nvidia-cudnn-cu12",
+            "nvidia-cufft-cu12",
+            "nvidia-cusolver-cu12",
+            "nvidia-cusparse-cu12",
+            "nvidia-nvjitlink-cu12"
+          )
 
           if ("${{ inputs.vapoursynth_release }}" -eq "latest") {
             $constraintsFile = Join-Path $env:RUNNER_TEMP "requirements-release-lock-vapoursynth-latest.txt"
@@ -455,7 +466,8 @@ jobs:
           # Bundle modelopt into the runtime site-packages only. The build venv does not need it,
           # and installing it there can trigger resolver issues against the pinned Torch build.
           Invoke-PipInstallWithArchive -PythonExe $python -Arguments (@("--upgrade") + $pipConstraints + @(
-            "nvidia-modelopt[all]", "triton-windows",
+            "nvidia-modelopt[all]", "triton-windows"
+          ) + $cuda12RuntimePackages + @(
             "--target", $env:RUNTIME_SITE_PACKAGES,
             "--extra-index-url", $env:TORCH_INDEX_URL,
             "--extra-index-url", $env:NVIDIA_PYPI_URL
@@ -565,6 +577,43 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           $python = ".\.venv-build\Scripts\python.exe"
+
+          function Get-PythonPackageDllDirs {
+            param([Parameter(Mandatory)] [string] $SitePackages)
+
+            $packageRoots = @(
+              "torch",
+              "nvidia",
+              "cutensor",
+              "onnxruntime",
+              "cupy",
+              "cupy_backends"
+            )
+            $dllDirs = [ordered]@{}
+
+            foreach ($packageRoot in $packageRoots) {
+              $root = Join-Path $SitePackages $packageRoot
+              if (-not (Test-Path $root)) {
+                continue
+              }
+
+              Get-ChildItem -Path $root -Recurse -File -Filter "*.dll" -ErrorAction SilentlyContinue | ForEach-Object {
+                $resolved = (Resolve-Path $_.DirectoryName).Path
+                $dllDirs[$resolved.ToLowerInvariant()] = $resolved
+              }
+            }
+
+            return @($dllDirs.Values)
+          }
+
+          $runtimeSitePackages = Join-Path $env:BUNDLE_ROOT "python\site-packages"
+          $packageDllDirs = @(Get-PythonPackageDllDirs -SitePackages $runtimeSitePackages)
+          if ($packageDllDirs.Count -gt 0) {
+            Write-Host "Adding Python package DLL dirs to PyInstaller PATH:"
+            $packageDllDirs | ForEach-Object { Write-Host "  $_" }
+            $env:PATH = (($packageDllDirs + @($env:PATH)) -join ";")
+          }
+
           & $python -m PyInstaller `
             --onedir `
             --name VidSmoother `
@@ -775,29 +824,39 @@ jobs:
             $scriptsRoot = ".\dist\VidSmoother\python-scripts"
           }
 
-          $packageDllDirs = @()
-          $torchLib = Join-Path $sitePackages "torch\lib"
-          if (Test-Path $torchLib) {
-            $packageDllDirs += (Resolve-Path $torchLib).Path
-          }
+          function Get-PythonPackageDllDirs {
+            param([Parameter(Mandatory)] [string] $SitePackages)
 
-          $nvidiaRoot = Join-Path $sitePackages "nvidia"
-          if (Test-Path $nvidiaRoot) {
-            Get-ChildItem -Path $nvidiaRoot -Directory | ForEach-Object {
-              foreach ($relativeDir in @("bin", "lib", "lib\x64")) {
-                $candidate = Join-Path $_.FullName $relativeDir
-                if (Test-Path $candidate) {
-                  $packageDllDirs += (Resolve-Path $candidate).Path
-                }
+            $packageRoots = @(
+              "torch",
+              "nvidia",
+              "cutensor",
+              "onnxruntime",
+              "cupy",
+              "cupy_backends"
+            )
+            $dllDirs = [ordered]@{}
+
+            foreach ($packageRoot in $packageRoots) {
+              $root = Join-Path $SitePackages $packageRoot
+              if (-not (Test-Path $root)) {
+                continue
+              }
+
+              Get-ChildItem -Path $root -Recurse -File -Filter "*.dll" -ErrorAction SilentlyContinue | ForEach-Object {
+                $resolved = (Resolve-Path $_.DirectoryName).Path
+                $dllDirs[$resolved.ToLowerInvariant()] = $resolved
               }
             }
+
+            return @($dllDirs.Values)
           }
 
+          $packageDllDirs = @(Get-PythonPackageDllDirs -SitePackages $sitePackages)
           $packageDllPath = ($packageDllDirs | Select-Object -Unique) -join ";"
-          $env:PATH = "$scriptsRoot;$runtimeRoot;$vsRoot;$sitePackages;$packageDllPath;$env:PATH"
           $env:PYTHONHOME = (Resolve-Path $runtimeRoot).Path
           $env:PYTHONPATH = (Resolve-Path $sitePackages).Path
-          $env:PATH = "$runtimeRoot;$vsRoot;$sitePackages;$packageDllPath;$env:PATH"
+          $env:PATH = "$scriptsRoot;$runtimeRoot;$vsRoot;$sitePackages;$packageDllPath;$env:PATH"
           $env:VAPOURSYNTH_EXTRA_PLUGIN_PATH = (Resolve-Path (Join-Path $vsRoot "vs-plugins")).Path
 
           & (Join-Path $vsRoot "vspipe.exe") --version
@@ -815,11 +874,84 @@ jobs:
             throw "Bundled runtime could not import nvidia-modelopt/modelopt."
           }
 
+          $cupySmoke = @'
+          import importlib
+
+          modules = [
+              "cupy.cuda.cufft",
+              "cupy.cuda.jitify",
+              "cupy_backends.cuda.libs.cublas",
+              "cupy_backends.cuda.libs.cusolver",
+              "cupy_backends.cuda.libs.cutensor",
+              "cupyx.cusolver",
+          ]
+          for module in modules:
+              importlib.import_module(module)
+
+          import cupy
+
+          device_count = cupy.cuda.runtime.getDeviceCount()
+          if device_count < 1:
+              raise SystemExit("CuPy loaded, but no CUDA devices were visible.")
+
+          x = cupy.arange(8, dtype=cupy.float32)
+          cupy.fft.fft(x).get()
+          cupy.linalg.solve(cupy.eye(2, dtype=cupy.float32), cupy.ones(2, dtype=cupy.float32)).get()
+          print(f"cupy {cupy.__version__} cuda devices {device_count}")
+          '@
+          & (Join-Path $runtimeRoot "python.exe") -c $cupySmoke
+          if ($LASTEXITCODE -ne 0) {
+            throw "Bundled runtime could not load CuPy CUDA DLL dependencies."
+          }
+
+          $onnxRuntimeSmoke = @'
+          import numpy as np
+          import onnx
+          from onnx import TensorProto, helper
+          import onnxruntime as ort
+
+          available = ort.get_available_providers()
+          if "CUDAExecutionProvider" not in available:
+              raise SystemExit(f"CUDAExecutionProvider is not available. Providers: {available}")
+
+          graph = helper.make_graph(
+              [
+                  helper.make_node("Identity", ["input"], ["output"]),
+              ],
+              "cuda_provider_smoke",
+              [helper.make_tensor_value_info("input", TensorProto.FLOAT, [1])],
+              [helper.make_tensor_value_info("output", TensorProto.FLOAT, [1])],
+          )
+          model = helper.make_model(
+              graph,
+              producer_name="vidsmoother-release-smoke",
+              opset_imports=[helper.make_operatorsetid("", 13)],
+          )
+          model.ir_version = 10
+
+          session = ort.InferenceSession(model.SerializeToString(), providers=["CUDAExecutionProvider"])
+          active = session.get_providers()
+          if "CUDAExecutionProvider" not in active:
+              raise SystemExit(f"CUDAExecutionProvider did not load. Active providers: {active}")
+
+          output = session.run(None, {"input": np.array([1.0], dtype=np.float32)})[0]
+          if output.tolist() != [1.0]:
+              raise SystemExit(f"Unexpected ONNX Runtime output: {output!r}")
+
+          print(f"onnxruntime {ort.__version__} CUDAExecutionProvider ok")
+          '@
+          & (Join-Path $runtimeRoot "python.exe") -c $onnxRuntimeSmoke
+          if ($LASTEXITCODE -ne 0) {
+            throw "Bundled runtime could not load ONNX Runtime CUDAExecutionProvider."
+          }
+
       - name: Create release files
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
           $releaseDir = Join-Path $env:RUNNER_TEMP "release"
+          Remove-Item -Recurse -Force -LiteralPath $releaseDir -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Force -Path $releaseDir | Out-Null
           Copy-Item -Recurse -Force -Path ".\dist\VidSmoother" -Destination $releaseDir
 
@@ -832,6 +964,7 @@ jobs:
           - VapourSynth: $env:VAPOURSYNTH_VERSION_LABEL Python package
           - L-SMASH-Works: $env:HOMEOFAVISYNTHPLUSEVOLUTION_L_SMASH_WORKS_TAG ($env:HOMEOFAVISYNTHPLUSEVOLUTION_L_SMASH_WORKS_ASSET)
           - MiscFilters VapourSynth plugin for misc.SCDetect / vsrife scene-change detection
+          - CUDA 12 runtime/math DLL wheels for CuPy and ONNX Runtime GPU providers
           - Python runtime/packages are bundled beside VidSmoother.exe by PyInstaller onedir mode.
 
           Target machine requirements:
@@ -852,24 +985,29 @@ jobs:
           $archiveBaseName = "$($env:PACKAGE_NAME)-${{ inputs.version }}.7z"
           $archiveBasePath = Join-Path $env:RUNNER_TEMP $archiveBaseName
 
-          Push-Location $releaseDir
+          Remove-Item -LiteralPath $archiveBasePath -Force -ErrorAction SilentlyContinue
+          Get-ChildItem -Path $env:RUNNER_TEMP -Filter "$archiveBaseName.*" -ErrorAction SilentlyContinue |
+            Remove-Item -Force
 
           # Use .7z instead of .zip and split into <2GB chunks for GitHub Release asset limits.
           # 1900m leaves margin below 2,147,483,648 bytes.
           $threads = [Environment]::ProcessorCount
 
-          7z a `
-            -t7z `
-            -mx=3 `
-            -m0=LZMA2:d=32m:fb=32:mf=bt4:mt=$threads `
-            -ms=off `
-            -mmt=$threads `
-            -v1900m `
-            -bb1 `
-            $archiveBasePath `
-            *
-
-          Pop-Location
+          Push-Location $releaseDir
+          try {
+            7z a `
+              -t7z `
+              -mx=3 `
+              "-m0=LZMA2:d=32m:fb=32:mf=bt4:mt=$threads" `
+              -ms=off `
+              "-mmt=$threads" `
+              -v1900m `
+              -bb1 `
+              $archiveBasePath `
+              *
+          } finally {
+            Pop-Location
+          }
 
           $archiveParts = Get-ChildItem -Path $env:RUNNER_TEMP -Filter "$archiveBaseName.*" | Sort-Object Name
           if (-not $archiveParts -or $archiveParts.Count -eq 0) {

@@ -5,6 +5,7 @@ import shutil
 import sys
 import threading
 import tomllib
+from functools import lru_cache
 from pathlib import Path
 
 from .config import ToolPaths
@@ -107,23 +108,33 @@ def _ensure_vapoursynth_config(root: Path) -> None:
         _vapoursynth_configured = True
 
 
+@lru_cache(maxsize=4)
+def _python_package_dll_dirs_cached(site_packages: str) -> tuple[Path, ...]:
+    package_root = Path(site_packages)
+    package_names = [
+        "torch",
+        "nvidia",
+        "cutensor",
+        "onnxruntime",
+        "cupy",
+        "cupy_backends",
+    ]
+    directories: dict[str, Path] = {}
+
+    for package_name in package_names:
+        root = package_root / package_name
+        if not root.exists():
+            continue
+        for dll in root.rglob("*.dll"):
+            if dll.is_file():
+                directories[str(dll.parent).lower()] = dll.parent
+
+    return tuple(directories.values())
+
+
 def _python_package_dll_dirs(root: Path) -> list[Path]:
     site_packages = root / "python" / "site-packages"
-    candidates = [site_packages / "torch" / "lib"]
-
-    nvidia_root = site_packages / "nvidia"
-    if nvidia_root.exists():
-        for package_dir in sorted(nvidia_root.iterdir()):
-            if package_dir.is_dir():
-                candidates.extend(
-                    [
-                        package_dir / "bin",
-                        package_dir / "lib",
-                        package_dir / "lib" / "x64",
-                    ]
-                )
-
-    return [path for path in candidates if path.exists()]
+    return list(_python_package_dll_dirs_cached(str(site_packages)))
 
 
 def bundled_runtime_env() -> dict[str, str]:
