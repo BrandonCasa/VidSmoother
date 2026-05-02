@@ -1,4 +1,4 @@
 reactpy[starlette]==1.1.0
-starlette==1.0.0
+starlette==0.47.3
 uvicorn==0.35.0
 colorlog==6.10.1
