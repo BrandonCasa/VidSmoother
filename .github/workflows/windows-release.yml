@@ -45,6 +45,9 @@ env:
   TORCH_INDEX_URL: https://download.pytorch.org/whl/cu130
   NVIDIA_PYPI_URL: https://pypi.nvidia.com
   PACKAGE_NAME: VidSmoother-windows11-nvidia
+  PIP_CACHE_DIR: ${{ github.workspace }}\.cache\pip
+  PYTHON_PACKAGE_ARCHIVE_DIR: ${{ github.workspace }}\.cache\python-package-archive
+  PYTHON_PACKAGE_WHEELHOUSE: ${{ github.workspace }}\.cache\python-package-archive\wheelhouse
 
 jobs:
   build-windows-release:
@@ -64,12 +67,16 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: ${{ inputs.python_version }}
-          cache: pip
-          cache-dependency-path: |
-            requirements-ui.txt
-            requirements-trt.txt
-            requirements-release-lock.txt
-            extern/vs-rife/pyproject.toml
+
+      - name: Cache append-only Python package artifacts
+        uses: actions/cache@v5
+        with:
+          path: |
+            .cache/pip
+            .cache/python-package-archive
+          key: python-package-artifacts-${{ runner.os }}-py-${{ inputs.python_version }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            python-package-artifacts-${{ runner.os }}-py-${{ inputs.python_version }}-
 
       - name: Cache selected release downloads
         if: ${{ inputs.ffmpeg_release != 'latest' && inputs.lsmash_release != 'latest' }}
@@ -236,6 +243,98 @@ jobs:
 
           $pipConstraints = @("-c", $constraintsFile)
 
+          function Get-PipDownloadArguments {
+            param([Parameter(Mandatory)] [string[]] $Arguments)
+
+            $downloadArguments = @()
+            for ($index = 0; $index -lt $Arguments.Count; $index++) {
+              $argument = $Arguments[$index]
+              if ($argument -in @("--upgrade", "-U")) {
+                continue
+              }
+              if ($argument -eq "--target") {
+                $index++
+                continue
+              }
+              if ($argument.StartsWith("--target=")) {
+                continue
+              }
+              $downloadArguments += $argument
+            }
+
+            return $downloadArguments
+          }
+
+          function Invoke-PipDownloadArchive {
+            param(
+              [Parameter(Mandatory)] [string] $PythonExe,
+              [Parameter(Mandatory)] [string[]] $Arguments,
+              [switch] $NoDependencies
+            )
+
+            New-Item -ItemType Directory -Force -Path $env:PYTHON_PACKAGE_WHEELHOUSE | Out-Null
+            $downloadArguments = @(Get-PipDownloadArguments -Arguments $Arguments)
+            if ($downloadArguments.Count -eq 0) {
+              return
+            }
+            $downloadArguments = @(
+              "--extra-index-url", $env:TORCH_INDEX_URL,
+              "--extra-index-url", $env:NVIDIA_PYPI_URL
+            ) + $downloadArguments
+            if ($NoDependencies) {
+              $downloadArguments = @("--no-deps") + $downloadArguments
+            }
+
+            & $PythonExe -m pip download --dest $env:PYTHON_PACKAGE_WHEELHOUSE @downloadArguments
+          }
+
+          function Invoke-PipInstallWithArchive {
+            param(
+              [Parameter(Mandatory)] [string] $PythonExe,
+              [Parameter(Mandatory)] [string[]] $Arguments
+            )
+
+            Invoke-PipDownloadArchive -PythonExe $PythonExe -Arguments $Arguments
+            & $PythonExe -m pip install @Arguments
+          }
+
+          function Save-PipInstalledPackageArtifacts {
+            param(
+              [Parameter(Mandatory)] [string] $PythonExe,
+              [Parameter(Mandatory)] [string] $Scope,
+              [string[]] $ListArguments = @()
+            )
+
+            $manifestDir = Join-Path $env:PYTHON_PACKAGE_ARCHIVE_DIR "manifests"
+            New-Item -ItemType Directory -Force -Path $manifestDir | Out-Null
+            New-Item -ItemType Directory -Force -Path $env:PYTHON_PACKAGE_WHEELHOUSE | Out-Null
+
+            $safeScope = ($Scope.ToLowerInvariant() -replace "[^a-z0-9._-]", "-").Trim("-")
+            if ([string]::IsNullOrWhiteSpace($safeScope)) {
+              $safeScope = "packages"
+            }
+            $timestamp = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssfffffffZ")
+            $manifest = Join-Path $manifestDir "$timestamp-$safeScope.txt"
+
+            & $PythonExe -m pip list --format=freeze @ListArguments | Set-Content -Path $manifest -Encoding ASCII
+            $manifestPackages = @(Get-Content $manifest | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+            if ($manifestPackages.Count -eq 0) {
+              return
+            }
+
+            try {
+              & $PythonExe -m pip download `
+                --dest $env:PYTHON_PACKAGE_WHEELHOUSE `
+                --no-deps `
+                --requirement $manifest `
+                --extra-index-url $env:TORCH_INDEX_URL `
+                --extra-index-url $env:NVIDIA_PYPI_URL
+            } catch {
+              Write-Warning "Could not archive every package from $Scope via pip download. The manifest was preserved at $manifest. $($_.Exception.Message)"
+              $global:LASTEXITCODE = 0
+            }
+          }
+
           if ($env:PYTHON_PACKAGE_CACHE_HIT -eq "true") {
             Write-Host "Using cached Python build and runtime packages."
 
@@ -259,38 +358,42 @@ jobs:
               Write-Host "vspipe.exe was not found in python-scripts; bundled VapourSynth copy will be used from libs\vapoursynth."
             }
 
+            Save-PipInstalledPackageArtifacts -PythonExe $python -Scope "build-venv-cache-hit"
+            Save-PipInstalledPackageArtifacts -PythonExe $python -Scope "runtime-site-packages-cache-hit" -ListArguments @("--path", $env:RUNTIME_SITE_PACKAGES)
             return
           }
 
           python -m venv .venv-build
 
-          & $python -m pip install --upgrade @pipConstraints pip packaging setuptools wheel hatchling pyinstaller
-          & $python -m pip install --upgrade @pipConstraints -r requirements-ui.txt
+          Save-PipInstalledPackageArtifacts -PythonExe $python -Scope "build-venv-initial"
 
-          & $python -m pip install --upgrade `
-            @pipConstraints `
-            torch torchvision torch_tensorrt `
-            --extra-index-url $env:TORCH_INDEX_URL `
-            --extra-index-url $env:NVIDIA_PYPI_URL
+          Invoke-PipInstallWithArchive -PythonExe $python -Arguments (@("--upgrade") + $pipConstraints + @("pip", "packaging", "setuptools", "wheel", "hatchling", "pyinstaller"))
+          Invoke-PipInstallWithArchive -PythonExe $python -Arguments (@("--upgrade") + $pipConstraints + @("-r", "requirements-ui.txt"))
 
-          & $python -m pip install --upgrade `
-            @pipConstraints `
-            torch torchvision torch_tensorrt `
-            --extra-index-url $env:TORCH_INDEX_URL `
-            --extra-index-url $env:NVIDIA_PYPI_URL
+          Invoke-PipInstallWithArchive -PythonExe $python -Arguments (@("--upgrade") + $pipConstraints + @(
+            "torch", "torchvision", "torch_tensorrt",
+            "--extra-index-url", $env:TORCH_INDEX_URL,
+            "--extra-index-url", $env:NVIDIA_PYPI_URL
+          ))
 
-          & $python -m pip install --upgrade @pipConstraints --no-build-isolation $env:VAPOURSYNTH_PACKAGE_SPEC ".\extern\vs-rife"
+          Invoke-PipInstallWithArchive -PythonExe $python -Arguments (@("--upgrade") + $pipConstraints + @(
+            "torch", "torchvision", "torch_tensorrt",
+            "--extra-index-url", $env:TORCH_INDEX_URL,
+            "--extra-index-url", $env:NVIDIA_PYPI_URL
+          ))
+
+          Invoke-PipInstallWithArchive -PythonExe $python -Arguments (@("--upgrade") + $pipConstraints + @("--no-build-isolation", $env:VAPOURSYNTH_PACKAGE_SPEC, ".\extern\vs-rife"))
 
           & $python -m pip check
 
-          & $python -m pip install --upgrade `
-            @pipConstraints `
-            --no-build-isolation `
-            --target $env:RUNTIME_SITE_PACKAGES `
-            packaging setuptools wheel $env:VAPOURSYNTH_PACKAGE_SPEC ".\extern\vs-rife" `
-            -r requirements-ui.txt `
-            --extra-index-url $env:TORCH_INDEX_URL `
-            --extra-index-url $env:NVIDIA_PYPI_URL
+          Invoke-PipInstallWithArchive -PythonExe $python -Arguments (@("--upgrade") + $pipConstraints + @(
+            "--no-build-isolation",
+            "--target", $env:RUNTIME_SITE_PACKAGES,
+            "packaging", "setuptools", "wheel", $env:VAPOURSYNTH_PACKAGE_SPEC, ".\extern\vs-rife",
+            "-r", "requirements-ui.txt",
+            "--extra-index-url", $env:TORCH_INDEX_URL,
+            "--extra-index-url", $env:NVIDIA_PYPI_URL
+          ))
 
           if (-not (Test-Path (Join-Path $vapourSynthPackage "vspipe.exe"))) {
             throw "Installed VapourSynth package did not contain vspipe.exe."
@@ -312,19 +415,22 @@ jobs:
 
           # Bundle modelopt into the runtime site-packages only. The build venv does not need it,
           # and installing it there can trigger resolver issues against the pinned Torch build.
-          & $python -m pip install --upgrade `
-            @pipConstraints `
-            nvidia-modelopt[all] triton-windows `
-            --target $env:RUNTIME_SITE_PACKAGES `
-            --extra-index-url $env:TORCH_INDEX_URL `
-            --extra-index-url $env:NVIDIA_PYPI_URL
+          Invoke-PipInstallWithArchive -PythonExe $python -Arguments (@("--upgrade") + $pipConstraints + @(
+            "nvidia-modelopt[all]", "triton-windows",
+            "--target", $env:RUNTIME_SITE_PACKAGES,
+            "--extra-index-url", $env:TORCH_INDEX_URL,
+            "--extra-index-url", $env:NVIDIA_PYPI_URL
+          ))
 
-          & $python -m pip install --upgrade `
-            @pipConstraints `
-            --target $env:RUNTIME_SITE_PACKAGES `
-            torch torchvision torch_tensorrt `
-            --extra-index-url $env:TORCH_INDEX_URL `
-            --extra-index-url $env:NVIDIA_PYPI_URL
+          Invoke-PipInstallWithArchive -PythonExe $python -Arguments (@("--upgrade") + $pipConstraints + @(
+            "--target", $env:RUNTIME_SITE_PACKAGES,
+            "torch", "torchvision", "torch_tensorrt",
+            "--extra-index-url", $env:TORCH_INDEX_URL,
+            "--extra-index-url", $env:NVIDIA_PYPI_URL
+          ))
+
+          Save-PipInstalledPackageArtifacts -PythonExe $python -Scope "build-venv-final"
+          Save-PipInstalledPackageArtifacts -PythonExe $python -Scope "runtime-site-packages-final" -ListArguments @("--path", $env:RUNTIME_SITE_PACKAGES)
 
           # Copy Scripts again after Torch install in case additional runtime executables/DLL-adjacent launchers were added.
           Copy-Item -Recurse -Force -Path (Join-Path $scriptsDir "*") -Destination $bundleScriptsDir
@@ -360,6 +466,8 @@ jobs:
 
           $pipConstraints = @("-c", $constraintsFile)
 
+          New-Item -ItemType Directory -Force -Path $env:PYTHON_PACKAGE_WHEELHOUSE | Out-Null
+          Invoke-Native $python -m pip download --dest $env:PYTHON_PACKAGE_WHEELHOUSE @pipConstraints vsrepo
           Invoke-Native $python -m pip install --upgrade @pipConstraints vsrepo
 
           if (-not (Test-Path $vsrepo)) {
