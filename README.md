@@ -110,7 +110,7 @@ Requirements:
 - NVIDIA GPU with a current NVIDIA driver
 - Python 3.12 or newer
 - FFmpeg with `ffmpeg.exe` and `ffprobe.exe`
-- VapourSynth R74 or newer with `vspipe.exe`
+- VapourSynth R75 or newer with `vspipe.exe`
 - L-SMASH-Works VapourSynth plugin for the default `lsmas` source filter
 - MiscFilters VapourSynth plugin for `misc.SCDetect`, which is used by `vs-rife` scene-change detection
 - 7-Zip, required by `vsrepo` when installing some VapourSynth plugins
