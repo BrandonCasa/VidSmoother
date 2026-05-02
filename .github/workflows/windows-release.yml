@@ -273,11 +273,7 @@ jobs:
             --extra-index-url $env:TORCH_INDEX_URL `
             --extra-index-url $env:NVIDIA_PYPI_URL
 
-          & $python -m pip install --upgrade `
-            @pipConstraints `
-            nvidia-modelopt[all] triton-windows `
-            --extra-index-url $env:TORCH_INDEX_URL `
-            --extra-index-url $env:NVIDIA_PYPI_URL
+          & $python -m pip install --upgrade @pipConstraints nvidia-modelopt[all] triton-windows
 
           & $python -m pip install --upgrade --force-reinstall `
             @pipConstraints `
@@ -316,12 +312,7 @@ jobs:
             Write-Host "vspipe.exe was not found in python-scripts; bundled VapourSynth copy will be used from libs\vapoursynth."
           }
 
-          & $python -m pip install --upgrade `
-            @pipConstraints `
-            nvidia-modelopt[all] triton-windows `
-            --target $env:RUNTIME_SITE_PACKAGES `
-            --extra-index-url $env:TORCH_INDEX_URL `
-            --extra-index-url $env:NVIDIA_PYPI_URL
+          & $python -m pip install --upgrade @pipConstraints nvidia-modelopt[all] triton-windows --target $env:RUNTIME_SITE_PACKAGES
 
           & $python -m pip install --upgrade --force-reinstall `
             @pipConstraints `
