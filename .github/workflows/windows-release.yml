@@ -816,14 +816,16 @@ jobs:
 
           # Use .7z instead of .zip and split into <2GB chunks for GitHub Release asset limits.
           # 1900m leaves margin below 2,147,483,648 bytes.
+          $threads = [Environment]::ProcessorCount
+
           7z a `
             -t7z `
-            -mx=9 `
-            -m0=LZMA2 `
-            -md=256m `
-            -mfb=64 `
-            -ms=on `
+            -mx=3 `
+            -m0=LZMA2:d=32m:fb=32:mf=bt4:mt=$threads `
+            -ms=off `
+            -mmt=$threads `
             -v1900m `
+            -bb1 `
             $archiveBasePath `
             *
 
