@@ -6,12 +6,31 @@ from .config import PipelineConfig
 from .media import VideoInfo
 
 
-def write_vapoursynth_script(video: Path, info: VideoInfo, script_path: Path, config: PipelineConfig) -> None:
+def write_vapoursynth_script(
+    video: Path,
+    info: VideoInfo,
+    script_path: Path,
+    config: PipelineConfig,
+    *,
+    frame_limit: int | None = None,
+) -> None:
     script_path.parent.mkdir(parents=True, exist_ok=True)
-    script_path.write_text(render_script(video, info, config), encoding="utf-8")
+    script_path.write_text(
+        render_script(video, info, config, frame_limit=frame_limit),
+        encoding="utf-8",
+    )
 
 
-def render_script(video: Path, info: VideoInfo, config: PipelineConfig) -> str:
+def render_script(
+    video: Path,
+    info: VideoInfo,
+    config: PipelineConfig,
+    *,
+    frame_limit: int | None = None,
+) -> str:
+    if frame_limit is not None and frame_limit <= 0:
+        raise ValueError("frame_limit must be greater than zero")
+
     source = _source_expression(video, config.vapoursynth.source_filter)
     output_pix_fmt = info.pix_fmt if config.nvenc.pix_fmt == "auto" else config.nvenc.pix_fmt
     output_format = _output_format(output_pix_fmt)
@@ -26,6 +45,7 @@ def render_script(video: Path, info: VideoInfo, config: PipelineConfig) -> str:
         "None" if config.rife.trt_optimization_level is None else str(config.rife.trt_optimization_level)
     )
     max_aux_streams = "None" if config.rife.trt_max_aux_streams is None else str(config.rife.trt_max_aux_streams)
+    limit = f"clip = clip[:{frame_limit}]\n" if frame_limit is not None else ""
 
     return f'''from pathlib import Path
 
@@ -57,6 +77,7 @@ clip = rife(
     trt_optimization_level={optimization_level},
     trt_cache_dir={str(config.rife.trt_cache_dir)!r},
 )
+{limit}\
 clip = core.resize.Bicubic(clip, format={output_format}, matrix_s={config.vapoursynth.matrix!r})
 clip.set_output()
 '''

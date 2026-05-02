@@ -684,18 +684,18 @@ def make_app_component():
         },
         "workers": {
             "beginner": {
-                "title": "Videos at once",
-                "what": "This controls how many videos VidSmoother tries to process in parallel.",
-                "how": "1 processes one video at a time. Higher values start multiple jobs at once.",
-                "implications": "More is not always faster. Interpolation and NVENC already use the GPU heavily, so multiple videos can cause slowdowns or out-of-memory errors.",
-                "related": "Affected by GPU number, Scale, Extra smoothing passes, and output codec.",
+                "title": "Worker slots",
+                "what": "This controls how many pieces of work VidSmoother can run in parallel.",
+                "how": "1 runs one thing at a time. Higher values can process multiple videos, or multiple dedup transition renders for one video.",
+                "implications": "More is not always faster. Interpolation and NVENC already use the GPU heavily, so extra workers can cause slowdowns or out-of-memory errors.",
+                "related": "Affected by GPU number, Scale, Frame deduplication, Extra smoothing passes, and output codec.",
             },
             "advanced": {
                 "title": "Workers",
                 "what": "Maps to --workers and is clamped to at least 1.",
-                "how": "process_all() uses a ThreadPoolExecutor when workers > 1. The UI currently starts selected files through the same per-video processing path.",
+                "how": "process_all() uses a ThreadPoolExecutor when workers > 1. Dedup timeline rendering also uses these slots inside a single video's transition render pass.",
                 "implications": "Parallel jobs can contend for CUDA, NVENC, disk, and TensorRT build resources.",
-                "related": "Tune alongside device_index, trt_cache_dir, and encoder limits.",
+                "related": "Tune alongside device_index, dedup settings, trt_cache_dir, and encoder limits.",
             },
         },
         "ensemble": {
@@ -879,9 +879,9 @@ def make_app_component():
         "dedup_preset": {
             "beginner": {
                 "title": "Frame deduplication",
-                "what": "This removes repeated or nearly repeated frames after smoothing.",
-                "how": "Medium and Strong map to numeric duplicate-detection strengths. Removed frames keep their timestamp gaps, so GIFs can store the skipped time as longer frame delays.",
-                "implications": "Medium is conservative. Strong can make held animation much smaller, but may remove subtle motion if the source barely changes.",
+                "what": "This removes repeated or nearly repeated source frames before smoothing.",
+                "how": "Medium and Strong map to numeric duplicate-detection strengths. Removed source-frame gaps are tracked, then RIFE renders a longer transition across each gap.",
+                "implications": "Medium is conservative. Strong can smooth through more held frames, but may treat subtle low-contrast motion as duplicate source material.",
                 "related": "Works with smoothness boost, GIF frame rate limit, and the advanced dedup strength.",
             },
             "advanced": {
@@ -895,19 +895,19 @@ def make_app_component():
         "dedup_strength": {
             "advanced": {
                 "title": "Dedup strength",
-                "what": "Controls how aggressively near-duplicate frames are removed.",
-                "how": "The value maps to FFmpeg duplicate thresholds. 0 disables deduplication; higher values tolerate more pixel difference before a frame is kept.",
-                "implications": "High values are useful for GIF holds and very static video, but can remove subtle movement or low-contrast animation.",
-                "related": "Dedup algorithm and GIF frame delay behavior.",
+                "what": "Controls how aggressively near-duplicate source frames are removed before interpolation.",
+                "how": "The value maps to FFmpeg duplicate thresholds. 0 disables deduplication; higher values tolerate more pixel difference before a source frame is kept.",
+                "implications": "High values are useful for held animation and very static video, but can remove subtle movement or low-contrast animation.",
+                "related": "Dedup algorithm and RIFE factor settings.",
             },
         },
         "dedup_algorithm": {
             "advanced": {
                 "title": "Dedup algorithm",
                 "what": "Chooses the filter chain used for duplicate detection.",
-                "how": "mpdecimate uses FFmpeg's pixel-threshold duplicate detector. cuda-mpdecimate runs CUDA upload/scale/download filtering before the same duplicate scoring stage.",
+                "how": "mpdecimate uses FFmpeg's pixel-threshold duplicate detector during the source prepass. cuda-mpdecimate runs CUDA upload/scale/download filtering before the same duplicate scoring stage.",
                 "implications": "The CUDA option requires an FFmpeg build with CUDA filters and NVIDIA support; unsupported builds will fail in ffmpeg.log.",
-                "related": "Dedup strength and FFmpeg path.",
+                "related": "Dedup strength and the pre-interpolation timeline path.",
             },
         },
         "ffmpeg": {
@@ -1274,7 +1274,7 @@ def make_app_component():
                     open_help,
                 ),
                 TextField(
-                    "Parallel workers",
+                    "Worker slots",
                     "workers",
                     settings,
                     set_settings,
@@ -1494,7 +1494,7 @@ def make_app_component():
                     open_help,
                 ),
                 TextField(
-                    "Videos to run at once",
+                    "Worker slots",
                     "workers",
                     settings,
                     set_settings,

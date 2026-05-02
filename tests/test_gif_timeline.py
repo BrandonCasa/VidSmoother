@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 from vidsmoother.config import (
     DedupOptions,
@@ -18,7 +19,9 @@ from vidsmoother.gif_timeline import (
     build_timeline_gif_filter_chain,
     build_timeline_segments,
     centisecond_durations,
+    coalesce_duplicate_gif_frames,
     parse_gif_frame_delays,
+    render_transition_frames,
     write_concat_manifest,
 )
 from vidsmoother.media import VideoInfo
@@ -138,6 +141,23 @@ class GifTimelineTests(unittest.TestCase):
         self.assertEqual(len(durations), 4)
         self.assertAlmostEqual(sum(durations), 0.10)
 
+    def test_coalesce_duplicate_gif_frames_merges_delays_before_interpolation(self) -> None:
+        with TemporaryDirectory() as temp:
+            root = Path(temp)
+            first = root / "a.png"
+            duplicate = root / "b.png"
+            first.write_bytes(b"same")
+            duplicate.write_bytes(b"same")
+
+            frames, delays = coalesce_duplicate_gif_frames(
+                [first, duplicate],
+                [40.0, 40.0],
+                config(dedup_strength=50.0),
+            )
+
+        self.assertEqual(frames, [first])
+        self.assertEqual(delays, [80.0])
+
     def test_concat_manifest_uses_explicit_durations_and_last_file_repeat(self) -> None:
         with TemporaryDirectory() as temp:
             root = Path(temp)
@@ -161,9 +181,9 @@ class GifTimelineTests(unittest.TestCase):
             self.assertIn("duration 0.300000", text)
             self.assertTrue(text.rstrip().endswith("b.png'"))
 
-    def test_timeline_filter_applies_width_and_optional_dedup(self) -> None:
+    def test_timeline_filter_applies_width_without_post_dedup(self) -> None:
         self.assertIn("scale=w='min(iw\\,720)'", build_timeline_gif_filter_chain(config()))
-        self.assertIn("mpdecimate=", build_timeline_gif_filter_chain(config(dedup_strength=50.0)))
+        self.assertNotIn("mpdecimate=", build_timeline_gif_filter_chain(config(dedup_strength=50.0)))
 
     def test_timeline_filter_is_valid_without_width_or_dedup(self) -> None:
         base = config()
@@ -180,6 +200,46 @@ class GifTimelineTests(unittest.TestCase):
         )
 
         self.assertTrue(build_timeline_gif_filter_chain(no_filters).startswith("[0:v]split=2"))
+
+    def test_transition_render_limits_vspipe_clip_to_requested_slots(self) -> None:
+        with TemporaryDirectory() as temp:
+            root = Path(temp)
+            frame = root / "a.png"
+            next_frame = root / "b.png"
+            frame.write_bytes(b"a")
+            next_frame.write_bytes(b"b")
+
+            def fake_pipe(vspipe_command, ffmpeg_command, **kwargs) -> None:
+                pattern = Path(ffmpeg_command[-1])
+                for index in range(1, 5):
+                    (pattern.parent / f"transition_{index:06d}.png").write_bytes(b"png")
+
+            with (
+                patch("vidsmoother.gif_timeline.run_command"),
+                patch("vidsmoother.gif_timeline.run_vspipe_to_ffmpeg", side_effect=fake_pipe),
+                patch("vidsmoother.gif_timeline.write_vapoursynth_script") as write_script,
+            ):
+                rendered = render_transition_frames(
+                    frame,
+                    next_frame,
+                    4,
+                    VideoInfo(
+                        path=Path("input.gif"),
+                        width=320,
+                        height=240,
+                        fps=10.0,
+                        duration=1.0,
+                        codec="gif",
+                        pix_fmt="bgra",
+                        has_audio=False,
+                    ),
+                    root / "transitions",
+                    root / "logs",
+                    config(dedup_strength=50.0),
+                )
+
+            self.assertEqual(len(rendered), 4)
+            self.assertEqual(write_script.call_args.kwargs["frame_limit"], 4)
 
     def test_legacy_gif_command_still_generates_palette_pipeline(self) -> None:
         info = VideoInfo(
