@@ -26,7 +26,7 @@ VidSmoother interpolates videos and animated GIFs with VapourSynth, RIFE TensorR
 - Dry-run mode that prints the generated `vspipe` and FFmpeg commands.
 - Configurable RIFE model, interpolation factor, CUDA device, TensorRT shape settings, and NVENC options.
 - Manual-only GitHub Actions release build for Windows 11/NVIDIA.
-- Release workflow can select `latest` or a specific release tag for FFmpeg, VapourSynth, and L-SMASH-Works.
+- Release workflow defaults to fixed FFmpeg, VapourSynth, L-SMASH-Works, and Python package versions, while still allowing `latest` to be typed for component inputs.
 - Release artifacts include a PyInstaller-built `VidSmoother.exe` intended to run without Python installed on the target machine.
 - Release builds bundle FFmpeg, VapourSynth, L-SMASH-Works, MiscFilters, Python runtime files, and required Python packages.
 
@@ -126,9 +126,9 @@ Create a virtual environment and install Python packages:
 
 ```powershell
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install --upgrade pip packaging setuptools wheel
-.\.venv\Scripts\python.exe -m pip install --upgrade torch torchvision torch_tensorrt --extra-index-url https://download.pytorch.org/whl/cu130 --extra-index-url https://pypi.nvidia.com
-.\.venv\Scripts\python.exe -m pip install --upgrade vapoursynth .\extern\vs-rife
+.\.venv\Scripts\python.exe -m pip install --upgrade -c requirements-release-lock.txt pip packaging setuptools wheel
+.\.venv\Scripts\python.exe -m pip install --upgrade -c requirements-release-lock.txt torch torchvision torch_tensorrt --extra-index-url https://download.pytorch.org/whl/cu130 --extra-index-url https://pypi.nvidia.com
+.\.venv\Scripts\python.exe -m pip install --upgrade -c requirements-release-lock.txt vapoursynth .\extern\vs-rife
 ```
 
 Configure VapourSynth and confirm the active plugin directory:
@@ -147,7 +147,7 @@ winget install 7zip.7zip
 Install the VapourSynth `misc` plugin used by `vs-rife` scene-change detection:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install --upgrade vsrepo
+.\.venv\Scripts\python.exe -m pip install --upgrade -c requirements-release-lock.txt vsrepo
 .\.venv\Scripts\vsrepo.exe update
 .\.venv\Scripts\vsrepo.exe install misc
 ```
@@ -189,7 +189,7 @@ Example using local project tools:
 Install the optional UI dependencies:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install -r requirements-ui.txt
+.\.venv\Scripts\python.exe -m pip install -c requirements-release-lock.txt -r requirements-ui.txt
 ```
 
 Start the local ReactPy interface:
@@ -209,7 +209,7 @@ This means `vs-rife` tried to call `misc.SCDetect`, but VapourSynth could not fi
 Fix:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install --upgrade vsrepo
+.\.venv\Scripts\python.exe -m pip install --upgrade -c requirements-release-lock.txt vsrepo
 .\.venv\Scripts\vsrepo.exe update
 .\.venv\Scripts\vsrepo.exe install misc
 ```
@@ -276,11 +276,27 @@ Use the GitHub Actions workflow instead of a local setup script:
 3. Click `Run workflow`.
 4. Set `version`, for example `v0.1.0`.
 5. Set `python_version`, usually `3.12`.
-6. Set `ffmpeg_release`, `vapoursynth_release`, and `lsmash_release`.
-7. Leave a component input as `latest` to use the latest matching release or package.
-8. Set `publish_release` to `true` only when you want the workflow to create a GitHub release.
+6. Leave the fixed defaults for reproducible builds, or set `ffmpeg_release`, `vapoursynth_release`, and `lsmash_release` explicitly.
+7. Type `latest` into a component input only when you intentionally want the latest matching release or package for that run.
+8. Bump `python_package_cache_version` when you need to force-refresh the cached Python build/runtime packages.
+9. Set `publish_release` to `true` only when you want the workflow to create a GitHub release.
 
 The workflow is manual-only. It does not run on pushes, pull requests, tags, schedules, or release events.
+
+Version inputs and Python dependencies are pinned in the repository:
+
+- `.github/workflows/windows-release.yml` defines the manual release workflow, fixed component defaults, cache keys, and `latest` override behavior.
+- `requirements-ui.txt` pins the direct ReactPy interface dependencies.
+- `requirements-trt.txt` pins the direct VapourSynth, RIFE, PyTorch, Torch-TensorRT, TensorRT, and NVIDIA runtime dependencies.
+- `requirements-release-lock.txt` pins the full transitive Python package set resolved for the Windows NVIDIA release workflow on Python 3.12.
+
+When changing Python package versions, update the direct requirement file first, then refresh `requirements-release-lock.txt` from pip's resolver using the workflow indexes:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install --dry-run --ignore-installed --report pip-report.json --extra-index-url https://download.pytorch.org/whl/cu130 --extra-index-url https://pypi.nvidia.com -r requirements-ui.txt -r requirements-trt.txt vsrepo
+```
+
+If the resolved set changes, update `requirements-release-lock.txt` and bump `python_package_cache_version` on the next manual release run.
 
 The release workflow is expected to:
 
