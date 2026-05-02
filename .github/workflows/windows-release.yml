@@ -25,7 +25,7 @@ on:
       python_package_cache_version:
         description: Bump this to refresh cached Python build/runtime packages
         required: true
-        default: v1
+        default: v2
         type: string
       ignore_workflow_changes_for_caching:
         description: Reuse the Python build/runtime cache even if workflow files changed
