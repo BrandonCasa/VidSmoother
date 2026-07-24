@@ -11,6 +11,7 @@
   <a href="https://github.com/BrandonCasa/VidSmoother/releases/latest">
     <img alt="Latest release" src="https://img.shields.io/github/v/release/BrandonCasa/VidSmoother?include_prereleases&sort=semver">
   </a>
+  [![Windows NVIDIA Release](https://github.com/BrandonCasa/VidSmoother/actions/workflows/windows-release.yml/badge.svg)](https://github.com/BrandonCasa/VidSmoother/actions/workflows/windows-release.yml)
   <img alt="Target platform" src="https://img.shields.io/badge/platform-Windows%2011%20%7C%20NVIDIA-0078D4">
 </p>
 
