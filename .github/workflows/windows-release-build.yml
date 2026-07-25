@@ -36,7 +36,7 @@ permissions:
   contents: read
 
 env:
-  TORCH_INDEX_URL: https://download.pytorch.org/whl/cu132
+  TORCH_INDEX_URL: https://download.pytorch.org/whl/cu130
   NVIDIA_PYPI_URL: https://pypi.nvidia.com
   PACKAGE_NAME: VidSmoother-windows11-nvidia
   PIP_CACHE_DIR: ${{ github.workspace }}\.cache\pip
@@ -130,7 +130,7 @@ jobs:
             .venv-build
             ${{ runner.temp }}\bundle\python\site-packages
             ${{ runner.temp }}\bundle\python-scripts
-          key: python-build-runtime-${{ inputs.python_package_cache_version }}-${{ runner.os }}-py-${{ inputs.python_version }}-torch-cu132-vs-${{ inputs.vapoursynth_release }}-${{ hashFiles('requirements-ui.txt', 'requirements-trt.txt', 'requirements-release-lock.txt', 'extern/vs-rife/pyproject.toml') }}-${{ inputs.ignore_workflow_changes_for_caching && 'ignored' || hashFiles('.github/workflows/windows-release.yml', '.github/workflows/windows-release-build.yml') }}
+          key: python-build-runtime-${{ inputs.python_package_cache_version }}-${{ runner.os }}-py-${{ inputs.python_version }}-torch-cu130-vs-${{ inputs.vapoursynth_release }}-${{ hashFiles('requirements-ui.txt', 'requirements-trt.txt', 'requirements-release-lock.txt', 'extern/vs-rife/pyproject.toml') }}-${{ inputs.ignore_workflow_changes_for_caching && 'ignored' || hashFiles('.github/workflows/windows-release.yml', '.github/workflows/windows-release-build.yml') }}
 
       - name: Prepare release download directories
         if: ${{ inputs.ffmpeg_release == 'latest' || inputs.lsmash_release == 'latest' || steps.release-download-cache.outputs.cache-hit != 'true' }}
