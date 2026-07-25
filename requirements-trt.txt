@@ -1,10 +1,10 @@
 packaging==26.2
 setuptools==83.0.0
 wheel==0.47.0
-VapourSynth==75
+VapourSynth==78
 vsrife==5.7.0
 torch==2.13.0
-torchvision==0.26.0+cu130
-torch-tensorrt==2.11.0+cu130
-nvidia-modelopt[all]==0.43.0
-triton-windows==3.6.0.post26
+torchvision==0.28.0+cu130
+torch-tensorrt==2.12.1+cu130
+nvidia-modelopt[all]==0.45.0
+triton-windows==3.7.1.post27
