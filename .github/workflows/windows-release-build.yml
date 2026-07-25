@@ -70,58 +70,42 @@ jobs:
             Write-Warning "Git usr\bin was not found at $gitUsrBin; cache compression may fail if gzip is unavailable."
           }
 
-      - name: Set up Python
+      - name: Set up Python and restore pip cache
+        id: setup-python
         uses: actions/setup-python@v6.2.0
         with:
           python-version: ${{ inputs.python_version }}
+          cache: pip
+          cache-dependency-path: |
+            requirements-ui.txt
+            requirements-trt.txt
+            requirements-release-lock.txt
+            extern/vs-rife/pyproject.toml
 
-      - name: Cache append-only Python package artifacts
+      # This is separate from setup-python's pip cache: it preserves downloaded
+      # wheels and package manifests used to make future release builds less
+      # dependent on upstream package availability.
+      - name: Cache append-only Python package archive
         uses: actions/cache@v5.0.5
         with:
-          path: |
-            .cache/pip
-            .cache/python-package-archive
-          key: python-package-artifacts-${{ runner.os }}-py-${{ inputs.python_version }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .cache/python-package-archive
+          key: python-package-archive-${{ runner.os }}-py-${{ inputs.python_version }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            python-package-artifacts-${{ runner.os }}-py-${{ inputs.python_version }}-
+            python-package-archive-${{ runner.os }}-py-${{ inputs.python_version }}-
 
       - name: Cache selected release downloads
+        id: release-download-cache
         if: ${{ inputs.ffmpeg_release != 'latest' && inputs.lsmash_release != 'latest' }}
         uses: actions/cache@v5.0.5
         with:
           path: .cache/release-downloads
-          key: release-downloads-${{ runner.os }}-ffmpeg-${{ inputs.ffmpeg_release }}-lsmash-${{ inputs.lsmash_release }}
-
-      - name: Compute workflow cache fingerprint
-        id: workflow-cache-fingerprint
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          if ("${{ inputs.ignore_workflow_changes_for_caching }}" -eq "true") {
-            "value=ignored" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding ascii
-            Write-Host "Ignoring workflow file changes when computing the Python build/runtime cache key."
-          } else {
-            $workflowFiles = @(
-              ".github\workflows\windows-release.yml",
-              ".github\workflows\windows-release-build.yml"
-            )
-            $workflowHashes = foreach ($workflowFile in $workflowFiles) {
-              $workflowPath = Join-Path $env:GITHUB_WORKSPACE $workflowFile
-              if (Test-Path $workflowPath) {
-                "$workflowFile=$((Get-FileHash -Algorithm SHA256 -Path $workflowPath).Hash.ToLowerInvariant())"
-              }
-            }
-            $fingerprintFile = Join-Path $env:RUNNER_TEMP "workflow-cache-fingerprint.txt"
-            $workflowHashes | Set-Content -Path $fingerprintFile -Encoding ASCII
-            $workflowHash = (Get-FileHash -Algorithm SHA256 -Path $fingerprintFile).Hash.ToLowerInvariant()
-            "value=$workflowHash" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding ascii
-          }
+          key: release-downloads-v2-${{ runner.os }}-ffmpeg-${{ inputs.ffmpeg_release }}-lsmash-${{ inputs.lsmash_release }}
 
       - name: Cache PyInstaller work files
         uses: actions/cache@v5.0.5
         with:
           path: ${{ env.PYINSTALLER_CACHE_DIR }}
-          key: pyinstaller-${{ inputs.python_package_cache_version }}-${{ runner.os }}-py-${{ inputs.python_version }}-${{ hashFiles('ui_main.py', 'main.py', 'vidsmoother/**/*.py', 'extern/vs-rife/**/*.py', 'requirements-ui.txt', 'requirements-trt.txt', 'requirements-release-lock.txt', 'extern/vs-rife/pyproject.toml') }}-${{ steps.workflow-cache-fingerprint.outputs.value }}
+          key: pyinstaller-${{ inputs.python_package_cache_version }}-${{ runner.os }}-py-${{ inputs.python_version }}-${{ hashFiles('ui_main.py', 'main.py', 'vidsmoother/**/*.py', 'extern/vs-rife/**/*.py', 'requirements-ui.txt', 'requirements-trt.txt', 'requirements-release-lock.txt', 'extern/vs-rife/pyproject.toml') }}-${{ inputs.ignore_workflow_changes_for_caching && 'ignored' || hashFiles('.github/workflows/windows-release.yml', '.github/workflows/windows-release-build.yml') }}
 
       - name: Prepare build layout
         shell: pwsh
@@ -146,89 +130,144 @@ jobs:
             .venv-build
             ${{ runner.temp }}\bundle\python\site-packages
             ${{ runner.temp }}\bundle\python-scripts
-          key: python-build-runtime-${{ inputs.python_package_cache_version }}-${{ runner.os }}-py-${{ inputs.python_version }}-torch-cu130-vs-${{ inputs.vapoursynth_release }}-${{ hashFiles('requirements-ui.txt', 'requirements-trt.txt', 'requirements-release-lock.txt', 'extern/vs-rife/pyproject.toml') }}-${{ steps.workflow-cache-fingerprint.outputs.value }}
+          key: python-build-runtime-${{ inputs.python_package_cache_version }}-${{ runner.os }}-py-${{ inputs.python_version }}-torch-cu130-vs-${{ inputs.vapoursynth_release }}-${{ hashFiles('requirements-ui.txt', 'requirements-trt.txt', 'requirements-release-lock.txt', 'extern/vs-rife/pyproject.toml') }}-${{ inputs.ignore_workflow_changes_for_caching && 'ignored' || hashFiles('.github/workflows/windows-release.yml', '.github/workflows/windows-release-build.yml') }}
 
-      - name: Resolve selected release assets
+      - name: Prepare release download directories
+        if: ${{ inputs.ffmpeg_release == 'latest' || inputs.lsmash_release == 'latest' || steps.release-download-cache.outputs.cache-hit != 'true' }}
+        shell: pwsh
+        run: |
+          $releaseDownloadRoot = Join-Path $env:GITHUB_WORKSPACE ".cache\release-downloads"
+          $downloadRoot = Join-Path $releaseDownloadRoot "incoming"
+          Remove-Item -Recurse -Force -Path $downloadRoot -ErrorAction SilentlyContinue
+
+          $canonicalDownloads = @(
+            (Join-Path $releaseDownloadRoot "ffmpeg.zip")
+            (Join-Path $releaseDownloadRoot "lsmash.7z")
+            (Join-Path $releaseDownloadRoot "metadata.json")
+          )
+          Remove-Item -Force -Path $canonicalDownloads -ErrorAction SilentlyContinue
+
+          New-Item -ItemType Directory -Force -Path (Join-Path $downloadRoot "ffmpeg"), (Join-Path $downloadRoot "lsmash") | Out-Null
+
+      - name: Download FFmpeg release assets
+        id: download-ffmpeg
+        if: ${{ inputs.ffmpeg_release == 'latest' || steps.release-download-cache.outputs.cache-hit != 'true' }}
+        uses: robinraju/release-downloader@v1.13
+        with:
+          repository: BtbN/FFmpeg-Builds
+          latest: ${{ inputs.ffmpeg_release == 'latest' }}
+          tag: ${{ inputs.ffmpeg_release != 'latest' && inputs.ffmpeg_release || '' }}
+          # The downloader accepts globs rather than regular expressions. Download
+          # the narrow GPL candidate set, then select the exact non-shared archive below.
+          fileName: ffmpeg-*-win64-gpl*.zip
+          out-file-path: .cache/release-downloads/incoming/ffmpeg
+          token: ${{ github.token }}
+
+      - name: Download L-SMASH-Works release asset
+        id: download-lsmash
+        if: ${{ inputs.lsmash_release == 'latest' || steps.release-download-cache.outputs.cache-hit != 'true' }}
+        uses: robinraju/release-downloader@v1.13
+        with:
+          repository: HomeOfAviSynthPlusEvolution/L-SMASH-Works
+          latest: ${{ inputs.lsmash_release == 'latest' }}
+          tag: ${{ inputs.lsmash_release != 'latest' && inputs.lsmash_release || '' }}
+          fileName: L-SMASH-Works-*.7z
+          out-file-path: .cache/release-downloads/incoming/lsmash
+          token: ${{ github.token }}
+
+      - name: Normalize release assets and metadata
         shell: pwsh
         env:
-          GITHUB_TOKEN: ${{ github.token }}
+          DOWNLOADED_FFMPEG_TAG: ${{ steps.download-ffmpeg.outputs.tag_name }}
+          DOWNLOADED_LSMASH_TAG: ${{ steps.download-lsmash.outputs.tag_name }}
         run: |
           $ErrorActionPreference = "Stop"
 
-          function Get-GitHubRelease {
-            param(
-              [Parameter(Mandatory)] [string] $Repository,
-              [Parameter(Mandatory)] [string] $Tag
-            )
-            $headers = @{
-              "Accept" = "application/vnd.github+json"
-              "X-GitHub-Api-Version" = "2022-11-28"
-              "User-Agent" = "VidSmoother-Release-Build"
+          $downloadRoot = Join-Path $env:GITHUB_WORKSPACE ".cache\release-downloads"
+          $metadataPath = Join-Path $downloadRoot "metadata.json"
+          $ffmpegArchive = Join-Path $downloadRoot "ffmpeg.zip"
+          $lsmashArchive = Join-Path $downloadRoot "lsmash.7z"
+
+          if (-not (Test-Path $ffmpegArchive) -or (Get-Item $ffmpegArchive).Length -eq 0) {
+            $ffmpegCandidate = Get-ChildItem -Path (Join-Path $downloadRoot "incoming\ffmpeg") -File -Recurse |
+              Where-Object { $_.Name -match '^ffmpeg-.*-win64-gpl(?:-[0-9.]+)?\.zip$' } |
+              Select-Object -First 1
+            if ($null -eq $ffmpegCandidate) {
+              $available = (Get-ChildItem -Path (Join-Path $downloadRoot "incoming\ffmpeg") -File -Recurse -ErrorAction SilentlyContinue |
+                ForEach-Object Name) -join ", "
+              throw "No non-shared win64 GPL FFmpeg archive was downloaded. Available files: $available"
             }
-            if (-not [string]::IsNullOrWhiteSpace($env:GITHUB_TOKEN)) {
-              $headers["Authorization"] = "Bearer $env:GITHUB_TOKEN"
-            }
-            if ($Tag -eq "latest") {
-              $uri = "https://api.github.com/repos/$Repository/releases/latest"
-            } else {
-              $uri = "https://api.github.com/repos/$Repository/releases/tags/$Tag"
-            }
-            Invoke-RestMethod -Headers $headers -Uri $uri
+            Copy-Item -Force -Path $ffmpegCandidate.FullName -Destination $ffmpegArchive
+          } else {
+            $ffmpegCandidate = Get-Item $ffmpegArchive
           }
 
-          function Save-ReleaseAsset {
-            param(
-              [Parameter(Mandatory)] [string] $Repository,
-              [Parameter(Mandatory)] [string] $Tag,
-              [Parameter(Mandatory)] [string] $AssetPattern,
-              [Parameter(Mandatory)] [string] $Destination
-            )
-            $release = Get-GitHubRelease -Repository $Repository -Tag $Tag
-            $asset = $release.assets | Where-Object { $_.name -match $AssetPattern } | Select-Object -First 1
-            if ($null -eq $asset) {
-              $names = ($release.assets | ForEach-Object { $_.name }) -join ", "
-              throw "No asset matching '$AssetPattern' found in $Repository release '$($release.tag_name)'. Assets: $names"
+          if (-not (Test-Path $lsmashArchive) -or (Get-Item $lsmashArchive).Length -eq 0) {
+            $lsmashCandidate = Get-ChildItem -Path (Join-Path $downloadRoot "incoming\lsmash") -File -Recurse -Filter "L-SMASH-Works-*.7z" |
+              Select-Object -First 1
+            if ($null -eq $lsmashCandidate) {
+              throw "No L-SMASH-Works .7z release asset was downloaded."
             }
-            if (Test-Path $Destination) {
-              $cachedAsset = Get-Item $Destination
-              if ($cachedAsset.Length -gt 0) {
-                Write-Host "Using cached $($asset.name): $Destination"
-              } else {
-                Write-Host "Cached file was empty; re-downloading $($asset.name)."
-                Invoke-WebRequest -Headers @{ "User-Agent" = "VidSmoother-Release-Build" } -Uri $asset.browser_download_url -OutFile $Destination
-              }
-            } else {
-              Invoke-WebRequest -Headers @{ "User-Agent" = "VidSmoother-Release-Build" } -Uri $asset.browser_download_url -OutFile $Destination
-            }
-            $envPrefix = ($Repository -replace "[^A-Za-z0-9]", "_").ToUpperInvariant()
-            "$($envPrefix)_TAG=$($release.tag_name)" | Out-File -FilePath $env:GITHUB_ENV -Append
-            "$($envPrefix)_ASSET=$($asset.name)" | Out-File -FilePath $env:GITHUB_ENV -Append
+            Copy-Item -Force -Path $lsmashCandidate.FullName -Destination $lsmashArchive
+          } else {
+            $lsmashCandidate = Get-Item $lsmashArchive
           }
 
-          $downloadDir = Join-Path $env:GITHUB_WORKSPACE ".cache\release-downloads"
-          New-Item -ItemType Directory -Force -Path $downloadDir | Out-Null
+          $metadata = if (Test-Path $metadataPath) {
+            Get-Content $metadataPath -Raw | ConvertFrom-Json
+          } else {
+            [pscustomobject]@{}
+          }
 
-          Save-ReleaseAsset `
-            -Repository "BtbN/FFmpeg-Builds" `
-            -Tag "${{ inputs.ffmpeg_release }}" `
-            -AssetPattern "^ffmpeg-.*-win64-gpl(?:-[0-9.]+)?\.zip$" `
-            -Destination (Join-Path $downloadDir "ffmpeg.zip")
+          $ffmpegTag = if (-not [string]::IsNullOrWhiteSpace($env:DOWNLOADED_FFMPEG_TAG)) {
+            $env:DOWNLOADED_FFMPEG_TAG
+          } elseif ($metadata.ffmpeg_tag) {
+            $metadata.ffmpeg_tag
+          } else {
+            "${{ inputs.ffmpeg_release }}"
+          }
+
+          $lsmashTag = if (-not [string]::IsNullOrWhiteSpace($env:DOWNLOADED_LSMASH_TAG)) {
+            $env:DOWNLOADED_LSMASH_TAG
+          } elseif ($metadata.lsmash_tag) {
+            $metadata.lsmash_tag
+          } else {
+            "${{ inputs.lsmash_release }}"
+          }
+
+          $ffmpegAssetName = if ($ffmpegCandidate.FullName -eq (Get-Item $ffmpegArchive).FullName -and $metadata.ffmpeg_asset) {
+            $metadata.ffmpeg_asset
+          } else {
+            $ffmpegCandidate.Name
+          }
+          $lsmashAssetName = if ($lsmashCandidate.FullName -eq (Get-Item $lsmashArchive).FullName -and $metadata.lsmash_asset) {
+            $metadata.lsmash_asset
+          } else {
+            $lsmashCandidate.Name
+          }
+
+          $metadata = [ordered]@{
+            ffmpeg_tag = $ffmpegTag
+            ffmpeg_asset = $ffmpegAssetName
+            lsmash_tag = $lsmashTag
+            lsmash_asset = $lsmashAssetName
+          }
+          $metadata | ConvertTo-Json | Set-Content -Path $metadataPath -Encoding UTF8
+
+          "BTBN_FFMPEG_BUILDS_TAG=$ffmpegTag" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding ascii
+          "BTBN_FFMPEG_BUILDS_ASSET=$ffmpegAssetName" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding ascii
+          "HOMEOFAVISYNTHPLUSEVOLUTION_L_SMASH_WORKS_TAG=$lsmashTag" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding ascii
+          "HOMEOFAVISYNTHPLUSEVOLUTION_L_SMASH_WORKS_ASSET=$lsmashAssetName" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding ascii
 
           $vapourSynthInput = "${{ inputs.vapoursynth_release }}"
           if ($vapourSynthInput -eq "latest") {
-            "VAPOURSYNTH_PACKAGE_SPEC=vapoursynth" | Out-File -FilePath $env:GITHUB_ENV -Append
-            "VAPOURSYNTH_VERSION_LABEL=latest" | Out-File -FilePath $env:GITHUB_ENV -Append
+            "VAPOURSYNTH_PACKAGE_SPEC=vapoursynth" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding ascii
+            "VAPOURSYNTH_VERSION_LABEL=latest" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding ascii
           } else {
             $vapourSynthVersion = $vapourSynthInput -replace "^[Rr]", ""
-            "VAPOURSYNTH_PACKAGE_SPEC=vapoursynth==$vapourSynthVersion" | Out-File -FilePath $env:GITHUB_ENV -Append
-            "VAPOURSYNTH_VERSION_LABEL=$vapourSynthInput" | Out-File -FilePath $env:GITHUB_ENV -Append
+            "VAPOURSYNTH_PACKAGE_SPEC=vapoursynth==$vapourSynthVersion" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding ascii
+            "VAPOURSYNTH_VERSION_LABEL=$vapourSynthInput" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding ascii
           }
-
-          Save-ReleaseAsset `
-            -Repository "HomeOfAviSynthPlusEvolution/L-SMASH-Works" `
-            -Tag "${{ inputs.lsmash_release }}" `
-            -AssetPattern "^L-SMASH-Works-.*\.7z$" `
-            -Destination (Join-Path $downloadDir "lsmash.7z")
 
       - name: Extract binary tools
         shell: pwsh
@@ -408,12 +447,6 @@ jobs:
 
           Invoke-PipInstallWithArchive -PythonExe $python -Arguments (@("--upgrade") + $pipConstraints + @("pip", "packaging", "setuptools", "wheel", "hatchling", "pyinstaller"))
           Invoke-PipInstallWithArchive -PythonExe $python -Arguments (@("--upgrade") + $pipConstraints + @("-r", "requirements-ui.txt"))
-
-          Invoke-PipInstallWithArchive -PythonExe $python -Arguments (@("--upgrade") + $pipConstraints + @(
-            "torch", "torchvision", "torch_tensorrt",
-            "--extra-index-url", $env:TORCH_INDEX_URL,
-            "--extra-index-url", $env:NVIDIA_PYPI_URL
-          ))
 
           Invoke-PipInstallWithArchive -PythonExe $python -Arguments (@("--upgrade") + $pipConstraints + @(
             "torch", "torchvision", "torch_tensorrt",
@@ -797,7 +830,6 @@ jobs:
           $env:PATH = "$scriptsRoot;$runtimeRoot;$vsRoot;$sitePackages;$packageDllPath;$env:PATH"
           $env:PYTHONHOME = (Resolve-Path $runtimeRoot).Path
           $env:PYTHONPATH = (Resolve-Path $sitePackages).Path
-          $env:PATH = "$runtimeRoot;$vsRoot;$sitePackages;$packageDllPath;$env:PATH"
           $env:VAPOURSYNTH_EXTRA_PLUGIN_PATH = (Resolve-Path (Join-Path $vsRoot "vs-plugins")).Path
 
           & (Join-Path $vsRoot "vspipe.exe") --version
